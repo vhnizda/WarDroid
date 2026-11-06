@@ -1,0 +1,35 @@
+diff --git a/SDL/src/sensor/android/SDL_androidsensor.c b/SDL/src/sensor/android/SDL_androidsensor.c
+index e6cfc23..9484857 100644
+--- a/SDL/src/sensor/android/SDL_androidsensor.c
++++ b/SDL/src/sensor/android/SDL_androidsensor.c
+@@ -171,7 +171,7 @@ SDL_ANDROID_SensorUpdate(SDL_Sensor *sensor)
+     ASensorEvent event;
+     struct android_poll_source* source;
+ 
+-    if (ALooper_pollAll(0, NULL, &events, (void**)&source) == LOOPER_ID_USER) {
++    if (ALooper_pollOnce(0, NULL, &events, (void**)&source) == LOOPER_ID_USER) {
+         SDL_zero(event);
+         while (ASensorEventQueue_getEvents(sensor->hwdata->eventqueue, &event, 1) > 0) {
+             SDL_PrivateSensorUpdate(sensor, event.data, SDL_arraysize(event.data));
+diff --git a/SDL_image/external/zlib/zlib.map b/SDL_image/external/zlib/zlib.map
+index b330b60..9600ca1 100644
+--- a/SDL_image/external/zlib/zlib.map
++++ b/SDL_image/external/zlib/zlib.map
+@@ -15,7 +15,6 @@ ZLIB_1.2.0 {
+     zcfree;
+     z_errmsg;
+     gz_error;
+-    gz_intmax;
+     _*;
+ };
+ 
+diff --git a/lua-5.1.5/toluapp-simple/CMakeLists.txt b/lua-5.1.5/toluapp-simple/CMakeLists.txt
+index bf3392d..3b30028 100644
+--- a/lua-5.1.5/toluapp-simple/CMakeLists.txt
++++ b/lua-5.1.5/toluapp-simple/CMakeLists.txt
+@@ -50,4 +50,4 @@ add_dependencies(toluapp51_shared lua51 lua51_shared lua51_static)
+ add_dependencies(toluapp51 lua51 lua51_shared lua51_static)
+ add_dependencies(toluapp lua51 lua51_shared lua51_static)
+ 
+-include_directories(${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
++include_directories(${CMAKE_LIBRARY_OUTPUT_DIRECTORY} ${PROJECT_SOURCE_DIR}/src)
