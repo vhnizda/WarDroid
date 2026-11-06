@@ -1,0 +1,6 @@
+[submodule "engine/stratagus"]
+	path = engine/stratagus
+	url = https://github.com/Wargus/stratagus.git
+[submodule "game/wargus"]
+	path = game/wargus
+	url = https://github.com/Wargus/wargus.git

@@ -1,0 +1,18 @@
+# Original game data must never be committed or distributed.
+data.Wargus/
+*.[wW][aA][rR]
+*.[sS][uU][dD]
+*.[cC][uU][dD]
+*.[mM][pP][qQ]
+*.[pP][uU][dD]
+setup_warcraft_ii*
+[iI][nN][sS][tT][aA][lL][lL].[eE][xX][eE]
+[tT][oO][mM][eE].[0-9]
+
+# Build output lives in D:\WarcraftAI-work, these are a safety net.
+build/
+.gradle/
+.cxx/
+local.properties
+*.apk
+*.aab
