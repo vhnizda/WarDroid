@@ -10,7 +10,8 @@ This repo contains no Blizzard data. Players supply `data.Wargus`, extracted fro
 |---|---|
 | `engine/stratagus` | Stratagus submodule |
 | `game/wargus` | Wargus submodule |
-| `android/cmake/ndk-toolchain.cmake` | NDK toolchain wrapper, see below |
+| `android` | Gradle project for the Android app |
+| `android/app/src/main/cpp` | Native build that wraps the engine into `libmain.so` |
 | `android/patches` | Changes to upstream code needed for Android |
 
 Because this folder is synced by IDrive, everything heavy lives on D: instead:
@@ -25,27 +26,50 @@ Because this folder is synced by IDrive, everything heavy lives on D: instead:
 
 ## Android build
 
-Build through the junction `D:\w`, which points at this folder. The real path is long enough to push SDL's header copy step past the Windows command line limit.
+### One-time setup
+
+1. Create the junction `D:\w`, which points at this folder. The real path is long enough to push SDL's header copy step past the Windows command line limit.
+
+   ```powershell
+   New-Item -ItemType Junction -Path D:\w -Target "C:\Users\Vaclav\Cloud-Drive\0. Game Essence\WarcraftAI"
+   ```
+
+2. Apply the patches. Repeat this after updating submodules.
+
+   ```powershell
+   git -C engine/stratagus/third-party apply "$PWD\android\patches\stratagus-third-party.patch"
+   ```
+
+3. Build the Windows tolua++, which generates the engine's Lua bindings during the Android build. This needs Visual Studio Build Tools 2022 with the C++ workload.
+
+   ```powershell
+   cmake -S D:/w/engine/stratagus/third-party/lua-5.1.5 -B D:/WarcraftAI-work/build/host-tolua -G "Visual Studio 17 2022" -A x64
+   cmake --build D:/WarcraftAI-work/build/host-tolua --config Release --target toluapp
+   ```
+
+### Building the APK
 
 ```powershell
-New-Item -ItemType Junction -Path D:\w -Target "C:\Users\Vaclav\Cloud-Drive\0. Game Essence\WarcraftAI"
+$env:JAVA_HOME = 'D:\Android\AndroidStudio\jbr'
+$env:ANDROID_HOME = 'D:\Android\Sdk'
+$env:GRADLE_USER_HOME = 'D:\WarcraftAI-work\gradle-home'
+D:\w\android\gradlew.bat -p D:\w\android --project-cache-dir D:/WarcraftAI-work/gradle-project-cache assembleDebug
 ```
 
-Apply the patches once after cloning or updating submodules:
-
-```powershell
-git -C engine/stratagus/third-party apply "$PWD\android\patches\stratagus-third-party.patch"
-```
+The APK lands in `D:\WarcraftAI-work\build\gradle\app\outputs\apk\debug`. Paths are set in `android/gradle.properties`.
 
 | Setting | Value |
 |---|---|
+| ABIs | `armeabi-v7a`, `arm64-v8a` |
+| Minimum Android | 6.0 (API 23) |
+| Target API | 33, because SDL 2.0.22 breaks on Android 14 rules at 34 and above |
 | NDK | 28.2.13676358 |
 | CMake | 3.31.6 from the SDK |
-| Minimum Android | API 23 |
-| Environment | `ANDROID_NDK_ROOT`, plus `WARCRAFTAI_ABI` set to `arm64-v8a` or `armeabi-v7a` |
-| CMake options | `-DCMAKE_TOOLCHAIN_FILE=D:/w/android/cmake/ndk-toolchain.cmake -DBUILD_VENDORED_LUA=ON -DBUILD_VENDORED_SDL=ON -DBUILD_VENDORED_MEDIA_LIBS=ON -DWITH_STACKTRACE=OFF -DWITH_OPENMP=OFF -DBUILD_TESTING=OFF` |
+| Gradle and AGP | 9.9.0 and 9.5.1 |
 
-The engine generates `tolua.cpp` at build time, so a real build also needs `-DSTRATAGUS_HOST_TOLUAPP=<path>`, a tolua++ program built for Windows.
+### Game data
+
+The app reads game data from `Android/data/com.vaclav.wargusport/files/data.Wargus` on the device. The app has no importer yet, so copy the folder with `adb push`.
 
 ## Upstream
 

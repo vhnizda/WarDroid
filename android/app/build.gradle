@@ -1,0 +1,62 @@
+plugins {
+    id 'com.android.application'
+}
+
+def workDir = providers.gradleProperty('warcraftai.workDir').get()
+def hostToluapp = providers.gradleProperty('warcraftai.hostToluapp').get()
+def engineDir = providers.gradleProperty('warcraftai.engineDir').get()
+def sdlJava = file('../../engine/stratagus/third-party/SDL/android-project/app/src/main/java')
+
+layout.buildDirectory.set(file("${workDir}/build/gradle/app"))
+
+android {
+    namespace 'com.vaclav.wargusport'
+    compileSdk 37
+    ndkVersion '28.2.13676358'
+
+    defaultConfig {
+        applicationId 'com.vaclav.wargusport'
+        minSdk 23
+        // SDL 2.0.22 registers broadcast receivers without the export flag
+        // that Android 14 requires once an app targets API 34 or higher.
+        targetSdk 33
+        versionCode 1
+        versionName '0.1'
+
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
+
+        externalNativeBuild {
+            cmake {
+                targets 'main'
+                arguments '-DANDROID_STL=c++_static',
+                          "-DSTRATAGUS_HOST_TOLUAPP=${hostToluapp}",
+                          "-DENGINE_DIR=${engineDir}"
+            }
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += sdlJava
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+            version '3.31.6'
+            buildStagingDirectory file("${workDir}/build/cxx")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}

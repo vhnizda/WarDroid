@@ -1,0 +1,11 @@
+set(ANDROID_ABI "@ANDROID_ABI@")
+set(ANDROID_PLATFORM "@ANDROID_PLATFORM@")
+set(ANDROID_STL "@ANDROID_STL@")
+set(CMAKE_BUILD_TYPE_INIT "@CMAKE_BUILD_TYPE@")
+# Gradle hands Ninja's location to the top-level build only.
+set(CMAKE_MAKE_PROGRAM "@CHILD_MAKE_PROGRAM@" CACHE FILEPATH "" FORCE)
+
+# SDL 2.0.22 makes this warning an error, and its Android code trips it.
+set(HAVE_GCC_WERROR_DECLARATION_AFTER_STATEMENT OFF CACHE INTERNAL "")
+
+include("@ANDROID_NDK@/build/cmake/android.toolchain.cmake")

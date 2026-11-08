@@ -14,5 +14,7 @@ build/
 .gradle/
 .cxx/
 local.properties
+.idea/
+.kotlin/
 *.apk
 *.aab
