@@ -23,6 +23,23 @@ index b330b60..9600ca1 100644
      _*;
  };
  
+diff --git a/lua-5.1.5/src/CMakeLists.txt b/lua-5.1.5/src/CMakeLists.txt
+index 05be0c3..6458639 100644
+--- a/lua-5.1.5/src/CMakeLists.txt
++++ b/lua-5.1.5/src/CMakeLists.txt
+@@ -5,6 +5,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
+ 
+ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+ 
++# Lua keeps string bytes just past the TString header. FORTIFY reads that as
++# zero bytes left in the object and aborts on strchr in the garbage collector.
++if(ANDROID)
++  add_compile_options(-U_FORTIFY_SOURCE)
++endif()
++
+ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
+ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
+ 
 diff --git a/lua-5.1.5/toluapp-simple/CMakeLists.txt b/lua-5.1.5/toluapp-simple/CMakeLists.txt
 index bf3392d..3b30028 100644
 --- a/lua-5.1.5/toluapp-simple/CMakeLists.txt
