@@ -69,6 +69,14 @@ The APK lands in `D:\WarcraftAI-work\build\gradle\app\outputs\apk\debug`. Paths 
 
 ### Game data
 
+Build the extractor once. Building `bzip2` first is needed because Wargus doesn't make `wartool` wait for it.
+
+```powershell
+cmake -S D:/w/game/wargus -B D:/WarcraftAI-work/build/host-wargus -G "Visual Studio 17 2022" -A x64 -DENABLE_VENDORED_LIBS=ON -DSTRATAGUS=D:/w/engine/stratagus/none.exe -DSTRATAGUS_INCLUDE_DIR=D:/w/engine/stratagus/gameheaders
+cmake --build D:/WarcraftAI-work/build/host-wargus --config Release --target bzip2
+cmake --build D:/WarcraftAI-work/build/host-wargus --config Release --target wartool
+```
+
 The app reads game data from `Android/data/com.vaclav.wargusport/files/data.Wargus` on the device. The app has no importer yet, so copy the folder with `adb push`.
 
 ## Upstream
