@@ -1,0 +1,38 @@
+diff --git a/src/video/sdl.cpp b/src/video/sdl.cpp
+index 18af13249..53f039791 100644
+--- a/src/video/sdl.cpp
++++ b/src/video/sdl.cpp
+@@ -428,7 +428,8 @@ void InitVideoSdl()
+ 		if (strlen(rendererInfo.name) == 0) {
+ 			dummyRenderer = true;
+ 		}
+-		if (starts_with(rendererInfo.name, "opengl")) {
++		// The shaders need desktop OpenGL, so not "opengles2" on mobile.
++		if (std::string_view(rendererInfo.name) == "opengl") {
+ 			LoadShaderExtensions();
+ 		}
+ 	}
+diff --git a/src/video/shaders.cpp b/src/video/shaders.cpp
+index 61b52a3f2..0fc073414 100644
+--- a/src/video/shaders.cpp
++++ b/src/video/shaders.cpp
+@@ -44,7 +44,10 @@
+ #include <iostream>
+ #include <regex>
+ 
+-// Avoiding the use of GLEW or some extensions handler
++// Avoiding the use of GLEW or some extensions handler.
++// Kept file-local: with SDL linked statically, global pointers named like the
++// GL entry points would replace the functions SDL's GLES2 renderer links to.
++namespace {
+ PFNGLCREATESHADERPROC glCreateShader;
+ PFNGLSHADERSOURCEPROC glShaderSource;
+ PFNGLCOMPILESHADERPROC glCompileShader;
+@@ -67,6 +70,7 @@ PFNGLUNIFORMMATRIX4FVPROC glUniformMatrix4fv;
+ 
+ PFNGLGETATTRIBLOCATIONPROC glGetAttribLocation;
+ PFNGLVERTEXATTRIB4FPROC glVertexAttrib4f;
++}
+ 
+ #ifdef WIN32
+ #define CCONV __stdcall

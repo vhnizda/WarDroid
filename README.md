@@ -37,6 +37,7 @@ Because this folder is synced by IDrive, everything heavy lives on D: instead:
 2. Apply the patches. Repeat this after updating submodules.
 
    ```powershell
+   git -C engine/stratagus apply "$PWD\android\patches\stratagus.patch"
    git -C engine/stratagus/third-party apply "$PWD\android\patches\stratagus-third-party.patch"
    ```
 
