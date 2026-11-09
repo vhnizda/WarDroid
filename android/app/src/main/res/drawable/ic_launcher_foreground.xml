@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A sword and an axe crossed at right angles. Each is drawn upright around
+     the canvas centre, then rotated 45 degrees either way. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.92"
+        android:scaleY="0.92">
+
+        <!-- Axe, head towards the upper left -->
+        <group
+            android:pivotX="54"
+            android:pivotY="54"
+            android:rotation="-45">
+            <path
+                android:fillColor="#8D5A2B"
+                android:pathData="M52.5,28L55.5,28L55.5,86L52.5,86Z" />
+            <path
+                android:fillColor="#6B4220"
+                android:pathData="M54.5,28L55.5,28L55.5,86L54.5,86Z" />
+            <path
+                android:fillColor="#4E342E"
+                android:pathData="M52.5,76L55.5,76L55.5,84L52.5,84Z" />
+            <path
+                android:fillColor="#90A4AE"
+                android:pathData="M52,86L56,86L55,88.5L53,88.5Z" />
+            <path
+                android:fillColor="#CFD8DC"
+                android:pathData="M51.5,31L44,26Q35,37 44,48L51.5,43Z" />
+            <path
+                android:fillColor="#90A4AE"
+                android:pathData="M51.5,33L47,30.5L47,44L51.5,41Z" />
+            <path
+                android:fillColor="#00000000"
+                android:strokeColor="#ECEFF1"
+                android:strokeWidth="1.4"
+                android:strokeLineCap="round"
+                android:pathData="M44,26Q35,37 44,48" />
+            <path
+                android:fillColor="#90A4AE"
+                android:pathData="M56.5,32L64,35.5L56.5,39Z" />
+            <path
+                android:fillColor="#78909C"
+                android:pathData="M51,30L57,30L57,43L51,43Z" />
+            <path
+                android:fillColor="#B0BEC5"
+                android:pathData="M52.5,30L54,25L55.5,30Z" />
+        </group>
+
+        <!-- Sword, point towards the upper right -->
+        <group
+            android:pivotX="54"
+            android:pivotY="54"
+            android:rotation="45">
+            <path
+                android:fillColor="#ECEFF1"
+                android:pathData="M54,22L50.5,28L50.5,66L54,66Z" />
+            <path
+                android:fillColor="#B0BEC5"
+                android:pathData="M54,22L57.5,28L57.5,66L54,66Z" />
+            <path
+                android:fillColor="#78909C"
+                android:pathData="M53.4,31L54.6,31L54.6,63L53.4,63Z" />
+            <path
+                android:fillColor="#F2B53A"
+                android:pathData="M43,66L65,66L67.5,68L65,70L43,70L40.5,68Z" />
+            <path
+                android:fillColor="#B07D12"
+                android:pathData="M41.8,69L66.2,69L65,70L43,70Z" />
+            <path
+                android:fillColor="#5D4037"
+                android:pathData="M52,70L56,70L56,80L52,80Z" />
+            <path
+                android:fillColor="#3E2723"
+                android:pathData="M52,72.5L56,73.5L56,74.5L52,73.5ZM52,76.5L56,77.5L56,78.5L52,77.5Z" />
+            <path
+                android:fillColor="#F2B53A"
+                android:pathData="M50.5,83.5a3.5,3.5 0,1 0,7 0a3.5,3.5 0,1 0,-7 0z" />
+            <path
+                android:fillColor="#69F0AE"
+                android:pathData="M52.2,83.5a1.8,1.8 0,1 0,3.6 0a1.8,1.8 0,1 0,-3.6 0z" />
+        </group>
+    </group>
+</vector>
