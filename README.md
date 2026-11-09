@@ -77,6 +77,17 @@ cmake --build D:/WarcraftAI-work/build/host-wargus --config Release --target bzi
 cmake --build D:/WarcraftAI-work/build/host-wargus --config Release --target wartool
 ```
 
+To build `data.Wargus`, follow the order Wargus's own launcher uses:
+
+1. Copy these folders from `game/wargus` into an empty `D:\WarcraftAI-work\data.Wargus`: `campaigns`, `contrib` (into `graphics/ui`), `maps`, `shaders` and `scripts`.
+2. Run the extractor over it, so extracted files replace any copied ones with the same name. `D:\WarcraftAI-work\data` holds the CD copy.
+
+   ```powershell
+   D:\WarcraftAI-work\build\host-wargus\Release\wartool.exe D:\WarcraftAI-work\data D:\WarcraftAI-work\data.Wargus
+   ```
+
+3. Copy `contrib/red_cross.png` to `graphics/missiles` and `contrib/cross.png` to `graphics/ui/cursors`, matching Wargus's install layout.
+
 The app reads game data from `Android/data/com.vaclav.wargusport/files/data.Wargus` on the device. The app has no importer yet, so copy the folder with `adb push`.
 
 ## Upstream
