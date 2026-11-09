@@ -1,8 +1,23 @@
 diff --git a/src/video/sdl.cpp b/src/video/sdl.cpp
-index 18af13249..53f039791 100644
+index 18af13249..04a5abd4c 100644
 --- a/src/video/sdl.cpp
 +++ b/src/video/sdl.cpp
-@@ -428,7 +428,8 @@ void InitVideoSdl()
+@@ -340,7 +340,14 @@ void InitVideoSdl()
+ 		}
+ 
+ 		SDL_CUSTOM_KEY_UP = SDL_RegisterEvents(1);
++#ifdef __ANDROID__
++		// SDL_StartTextInput would keep Android's on-screen keyboard over the
++		// game. Text events still arrive from physical keyboards.
++		SDL_EventState(SDL_TEXTINPUT, SDL_ENABLE);
++		SDL_EventState(SDL_TEXTEDITING, SDL_ENABLE);
++#else
+ 		SDL_StartTextInput();
++#endif
+ 
+ 		// Clean up on exit
+ 		atexit(CleanUpVideoSdl);
+@@ -428,7 +435,8 @@ void InitVideoSdl()
  		if (strlen(rendererInfo.name) == 0) {
  			dummyRenderer = true;
  		}
