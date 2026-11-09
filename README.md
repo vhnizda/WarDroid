@@ -39,6 +39,7 @@ Because this folder is synced by IDrive, everything heavy lives on D: instead:
    ```powershell
    git -C engine/stratagus apply "$PWD\android\patches\stratagus.patch"
    git -C engine/stratagus/third-party apply "$PWD\android\patches\stratagus-third-party.patch"
+   git -C game/wargus apply "$PWD\android\patches\wargus.patch"
    ```
 
 3. Build the Windows tolua++, which generates the engine's Lua bindings during the Android build. This needs Visual Studio Build Tools 2022 with the C++ workload.
@@ -88,6 +89,16 @@ To build `data.Wargus`, follow the order Wargus's own launcher uses:
    ```
 
 3. Copy `contrib/red_cross.png` to `graphics/missiles` and `contrib/cross.png` to `graphics/ui/cursors`, matching Wargus's install layout.
+
+### Music
+
+The Battle.net Edition's music is MIDI, which the game plays through TiMidity. That needs instruments in `data.Wargus/timidity`, built from the GeneralUser GS SoundFont (free licence, kept in `D:\WarcraftAI-work\soundfont`). Build the converter once, then run the script, which keeps only the instruments the music uses:
+
+```powershell
+cmake -S D:/w/engine/stratagus/third-party/unsf -B D:/WarcraftAI-work/build/host-unsf -G "Visual Studio 17 2022" -A x64
+cmake --build D:/WarcraftAI-work/build/host-unsf --config Release
+powershell -File android\music\make-timidity.ps1 -SoundFont D:\WarcraftAI-work\soundfont\GeneralUser-GS\GeneralUser-GS.sf2 -Music D:\WarcraftAI-work\data.Wargus\music -Out D:\WarcraftAI-work\data.Wargus\timidity -Unsf D:\WarcraftAI-work\build\host-unsf\Release\unsf.exe
+```
 
 The app reads game data from `Android/data/com.vaclav.wargusport/files/data.Wargus` on the device. The app has no importer yet, so copy the folder with `adb push`.
 

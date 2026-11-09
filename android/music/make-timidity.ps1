@@ -1,0 +1,130 @@
+# Builds a TiMidity instrument set for the game's MIDI music from a General
+# MIDI SoundFont. Only the bank 0 instruments the music actually uses are
+# kept, plus the standard drum kit, so the set stays small enough for phones.
+#
+#   powershell -File android\music\make-timidity.ps1 `
+#       -SoundFont D:\WarcraftAI-work\soundfont\GeneralUser-GS\GeneralUser-GS.sf2 `
+#       -Music D:\WarcraftAI-work\data.Wargus\music `
+#       -Out D:\WarcraftAI-work\data.Wargus\timidity `
+#       -Unsf D:\WarcraftAI-work\build\host-unsf\Release\unsf.exe
+#
+# The engine loads <data>/timidity/timidity.cfg, and TiMidity resolves patch
+# paths relative to that file.
+param(
+    [Parameter(Mandatory)][string]$SoundFont,
+    [Parameter(Mandatory)][string]$Music,
+    [Parameter(Mandatory)][string]$Out,
+    [Parameter(Mandatory)][string]$Unsf
+)
+
+$ErrorActionPreference = 'Stop'
+
+# Program numbers used by melodic channels in every MIDI file. Channel 10
+# (index 9) is percussion and takes its sounds from the drum kit instead.
+function Get-MidiPrograms($path) {
+    $b = [IO.File]::ReadAllBytes($path)
+    $programs = New-Object 'System.Collections.Generic.HashSet[int]'
+    $pos = 0
+    while ($pos + 8 -le $b.Length) {
+        $id = [Text.Encoding]::ASCII.GetString($b, $pos, 4)
+        $len = ($b[$pos + 4] -shl 24) -bor ($b[$pos + 5] -shl 16) -bor ($b[$pos + 6] -shl 8) -bor $b[$pos + 7]
+        $pos += 8
+        $end = $pos + $len
+        if ($id -eq 'MTrk') {
+            $p = $pos
+            $status = 0
+            while ($p -lt $end) {
+                # Delta time.
+                do { $v = $b[$p]; $p++ } while ($v -band 0x80)
+                $byte = $b[$p]
+                if ($byte -band 0x80) { $status = $byte; $p++ }
+                if ($status -eq 0xFF) {
+                    $p++
+                    $n = 0; do { $v = $b[$p]; $p++; $n = ($n -shl 7) -bor ($v -band 0x7F) } while ($v -band 0x80)
+                    $p += $n
+                    $status = 0
+                } elseif ($status -eq 0xF0 -or $status -eq 0xF7) {
+                    $n = 0; do { $v = $b[$p]; $p++; $n = ($n -shl 7) -bor ($v -band 0x7F) } while ($v -band 0x80)
+                    $p += $n
+                    $status = 0
+                } else {
+                    $type = $status -band 0xF0
+                    $channel = $status -band 0x0F
+                    if ($type -eq 0xC0) {
+                        if ($channel -ne 9) { [void]$programs.Add([int]$b[$p]) }
+                        $p += 1
+                    } elseif ($type -eq 0xD0) {
+                        $p += 1
+                    } else {
+                        $p += 2
+                    }
+                }
+            }
+        }
+        $pos = $end
+    }
+    # Channels that never change program play piano.
+    [void]$programs.Add(0)
+    ,$programs
+}
+
+$used = New-Object 'System.Collections.Generic.HashSet[int]'
+$files = Get-ChildItem -LiteralPath $Music -Filter *.mid
+foreach ($f in $files) { foreach ($p in (Get-MidiPrograms $f.FullName)) { [void]$used.Add($p) } }
+Write-Host "$($files.Count) MIDI files use $($used.Count) instruments: $(($used | Sort-Object) -join ' ')"
+
+# Convert with one velocity layer per instrument (-s) and in mono (-m).
+$work = Join-Path ([IO.Path]::GetTempPath()) ("unsf-" + [Guid]::NewGuid())
+New-Item -ItemType Directory -Path $work | Out-Null
+try {
+    Copy-Item -LiteralPath $SoundFont (Join-Path $work 'soundfont.sf2')
+    Push-Location $work
+    try { & $Unsf -s -m soundfont.sf2 | Out-Null } finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { throw "unsf failed with exit code $LASTEXITCODE" }
+    $cfg = Get-Content (Join-Path $work 'soundfont.cfg')
+
+    # Keep bank 0 entries for used programs and every drum kit 0 entry.
+    $keep = New-Object System.Collections.Generic.List[string]
+    $section = ''
+    foreach ($line in $cfg) {
+        if ($line -match '^(bank|drumset)\s+(\d+)') {
+            $section = "$($Matches[1]) $($Matches[2])"
+            if ($section -eq 'bank 0' -or $section -eq 'drumset 0') { $keep.Add(''); $keep.Add("$($Matches[1]) 0") }
+            continue
+        }
+        if ($line -match '^\s+(\d+)\s+(\S+)') {
+            if ($section -eq 'drumset 0' -or ($section -eq 'bank 0' -and $used.Contains([int]$Matches[1]))) {
+                $keep.Add($line)
+            }
+        }
+    }
+
+    if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Recurse -Force }
+    New-Item -ItemType Directory -Path $Out | Out-Null
+    $missing = @()
+    foreach ($line in $keep) {
+        if ($line -match '^\s+\d+\s+(\S+)') {
+            $rel = $Matches[1] + '.pat'
+            $src = Join-Path $work $rel
+            if (-not (Test-Path -LiteralPath $src)) { $missing += $rel; continue }
+            $dst = Join-Path $Out $rel
+            New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+            Copy-Item -LiteralPath $src $dst
+        }
+    }
+    $header = @(
+        "# TiMidity instruments for the game's MIDI music, generated by",
+        "# android/music/make-timidity.ps1 from $(Split-Path $SoundFont -Leaf).",
+        "# Only the bank 0 instruments the music uses, plus drum kit 0."
+    )
+    [IO.File]::WriteAllLines((Join-Path $Out 'timidity.cfg'), [string[]]($header + $keep))
+
+    $licence = Join-Path (Split-Path $SoundFont) 'LICENSE.txt'
+    if (Test-Path -LiteralPath $licence) { Copy-Item -LiteralPath $licence (Join-Path $Out 'SOUNDFONT-LICENSE.txt') }
+
+    $size = (Get-ChildItem -LiteralPath $Out -Recurse -File | Measure-Object Length -Sum).Sum
+    Write-Host ("Wrote {0} ({1:N1} MB)" -f $Out, ($size / 1MB))
+    if ($missing) { Write-Warning "Patches unsf could not create: $($missing -join ', ')" }
+} finally {
+    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+}

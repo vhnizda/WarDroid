@@ -1,0 +1,39 @@
+diff --git a/wartool.cpp b/wartool.cpp
+index 8e6bfa4b..2360c189 100644
+--- a/wartool.cpp
++++ b/wartool.cpp
+@@ -1929,6 +1929,7 @@ int ConvertMusic(void)
+ 	int cmdlen;
+ 	int ret, i;
+ 	int count = 0;
++	int found = 0;
+ 
+ 	for ( i = 0; MusicNames[i]; ++i ) {
+ 		snprintf(buf, 4095, "%s/%s/%s.wav", Dir, MUSIC_PATH, MusicNames[i]);
+@@ -1936,6 +1937,7 @@ int ConvertMusic(void)
+ 
+ 		if (stat(buf, &st))
+ 			continue;
++		++found;
+ 
+ 		cmdlen = strlen("ffmpeg -y -i \"") + strlen(buf) + strlen("\" \"") + strlen(buf) + strlen("\" ");
+ 		cmd = (char*) calloc(cmdlen + 1, 1);
+@@ -1966,6 +1968,7 @@ int ConvertMusic(void)
+ 
+ 			if (stat(buf, &st))
+ 				continue;
++			++found;
+ 
+ 			cmdlen = strlen("ffmpeg -y -i \"") + strlen(buf) + strlen("\" \"") + strlen(buf) + strlen("\" ");
+ 			cmd = (char*) calloc(cmdlen + 1, 1);
+@@ -1991,7 +1994,9 @@ int ConvertMusic(void)
+ 		}
+ 	}
+ 
+-	if (count == 0)
++	// Only report failure when there were WAVs to convert. The Battle.net
++	// edition ships its music as MIDI, so there are none.
++	if (found && count == 0)
+ 		return 1;
+ 	else
+ 		return 0;
