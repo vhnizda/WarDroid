@@ -92,7 +92,7 @@ To build `data.Wargus`, follow the order Wargus's own launcher uses:
 
 ### Music
 
-The Battle.net Edition's music is MIDI, which the game plays through TiMidity. That needs instruments in `data.Wargus/timidity`, built from the GeneralUser GS SoundFont (free licence, kept in `D:\WarcraftAI-work\soundfont`). Build the converter once, then run the script, which keeps only the instruments the music uses:
+The Battle.net Edition's music is MIDI, which the game plays through TiMidity. That needs instruments in `data.Wargus/timidity`, built from the GeneralUser GS SoundFont (free licence, kept in `D:\WarcraftAI-work\soundfont`). Build the converter once, then run the script, which keeps only the instruments the music uses and removes the vibrato that `unsf` adds to brass and winds:
 
 ```powershell
 cmake -S D:/w/engine/stratagus/third-party/unsf -B D:/WarcraftAI-work/build/host-unsf -G "Visual Studio 17 2022" -A x64

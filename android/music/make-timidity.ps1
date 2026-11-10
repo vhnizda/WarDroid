@@ -68,6 +68,19 @@ function Get-MidiPrograms($path) {
     ,$programs
 }
 
+# unsf gives brass and winds a deep vibrato that starts with every note,
+# which makes held notes wobble like a slowed tape. Zero the vibrato sweep,
+# rate and depth in each sample header of a GUS patch.
+function Clear-PatchVibrato($path) {
+    $b = [IO.File]::ReadAllBytes($path)
+    $p = 239
+    for ($i = 0; $i -lt $b[198]; $i++) {
+        $b[$p + 52] = 0; $b[$p + 53] = 0; $b[$p + 54] = 0
+        $p += 96 + [BitConverter]::ToInt32($b, $p + 8)
+    }
+    [IO.File]::WriteAllBytes($path, $b)
+}
+
 $used = New-Object 'System.Collections.Generic.HashSet[int]'
 $files = Get-ChildItem -LiteralPath $Music -Filter *.mid
 foreach ($f in $files) { foreach ($p in (Get-MidiPrograms $f.FullName)) { [void]$used.Add($p) } }
@@ -109,7 +122,10 @@ try {
             if (-not (Test-Path -LiteralPath $src)) { $missing += $rel; continue }
             $dst = Join-Path $Out $rel
             New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
-            Copy-Item -LiteralPath $src $dst
+            if (-not (Test-Path -LiteralPath $dst)) {
+                Copy-Item -LiteralPath $src $dst
+                Clear-PatchVibrato $dst
+            }
         }
     }
     $header = @(
