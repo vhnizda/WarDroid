@@ -102,6 +102,14 @@ powershell -File android\music\make-timidity.ps1 -SoundFont D:\WarcraftAI-work\s
 
 The app reads game data from `Android/data/com.vaclav.wargusport/files/data.Wargus` on the device. The app has no importer yet, so copy the folder with `adb push`.
 
+### LAN multiplayer
+
+Both devices need the same APK and the same `data.Wargus`, since the join menu lives in `scripts/menus/network.lua`.
+
+The host creates a game as usual. While its game menu is open it answers search probes on UDP port 6661, and the game itself runs on UDP 6660. A joiner opens Join Game and taps **Search LAN**, which probes every address in its Wi-Fi subnet. If exactly one host answers, it joins straight away. If several answer, they appear in the server list to pick from. The engine's own mDNS discovery still runs too, for networks that pass multicast.
+
+Some routers, especially guest networks, stop devices talking to each other, and then nothing is found. An emulator behind NAT, such as MuMu in its default network mode, can join a phone's game but can't be found by one.
+
 ## Upstream
 
 The submodules point at the upstream repos. To fork, create the forks on GitHub, then add them as a remote in each submodule and update `.gitmodules`.

@@ -1,3 +1,269 @@
+diff --git a/src/include/net_lowlevel.h b/src/include/net_lowlevel.h
+index 4df2bce7f..0386fc061 100644
+--- a/src/include/net_lowlevel.h
++++ b/src/include/net_lowlevel.h
+@@ -35,6 +35,7 @@
+ --  Includes
+ ----------------------------------------------------------------------------*/
+ 
++#include <utility>
+ #include <vector>
+ 
+ // Include system network headers
+@@ -115,6 +116,8 @@ extern void NetExit();
+ extern unsigned long NetResolveHost(const std::string &host);
+ /// Get local IPs
+ extern std::vector<unsigned long> NetSocketAddr();
++/// Get local IPs with their netmasks
++extern std::vector<std::pair<unsigned long, unsigned long>> NetSocketSubnets();
+ /// Get local hostname
+ extern std::string NetGetHostname();
+ 
+diff --git a/src/network/net_lowlevel.cpp b/src/network/net_lowlevel.cpp
+index c1b0391b6..ac947b0bb 100644
+--- a/src/network/net_lowlevel.cpp
++++ b/src/network/net_lowlevel.cpp
+@@ -281,6 +281,44 @@ std::vector<unsigned long> NetSocketAddr()
+ 	}
+ 	return ips;
+ }
++#elif defined(__ANDROID__) // } {
++// getifaddrs needs Android 7, so ask the kernel directly, which works on all versions.
++std::vector<std::pair<unsigned long, unsigned long>> NetSocketSubnets()
++{
++	std::vector<std::pair<unsigned long, unsigned long>> subnets;
++	const int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
++	if (sockfd < 0) {
++		return subnets;
++	}
++	struct ifreq ifr[32];
++	struct ifconf ifc{};
++	ifc.ifc_len = sizeof(ifr);
++	ifc.ifc_req = ifr;
++	if (ioctl(sockfd, SIOCGIFCONF, &ifc) == 0) {
++		const int count = ifc.ifc_len / sizeof(struct ifreq);
++		for (int i = 0; i < count; ++i) {
++			struct ifreq req = ifr[i];
++			if (req.ifr_addr.sa_family != AF_INET) continue;
++			const unsigned long ip = ((struct sockaddr_in *)&req.ifr_addr)->sin_addr.s_addr;
++			if (ioctl(sockfd, SIOCGIFFLAGS, &req) != 0) continue;
++			if (req.ifr_flags & (IFF_LOOPBACK | IFF_POINTOPOINT)) continue;
++			if ((req.ifr_flags & IFF_UP) == 0) continue;
++			if (ioctl(sockfd, SIOCGIFNETMASK, &req) != 0) continue;
++			subnets.emplace_back(ip, ((struct sockaddr_in *)&req.ifr_netmask)->sin_addr.s_addr);
++		}
++	}
++	close(sockfd);
++	return subnets;
++}
++
++std::vector<unsigned long> NetSocketAddr()
++{
++	std::vector<unsigned long> ips;
++	for (const auto &subnet : NetSocketSubnets()) {
++		ips.push_back(subnet.first);
++	}
++	return ips;
++}
+ #else // } {
+ // more??
+ std::vector<unsigned long> NetSocketAddr()
+@@ -289,6 +327,18 @@ std::vector<unsigned long> NetSocketAddr()
+ }
+ #endif // }
+ 
++#ifndef __ANDROID__
++// Netmasks aren't looked up here, so assume the usual home network size.
++std::vector<std::pair<unsigned long, unsigned long>> NetSocketSubnets()
++{
++	std::vector<std::pair<unsigned long, unsigned long>> subnets;
++	for (auto ip : NetSocketAddr()) {
++		subnets.emplace_back(ip, htonl(0xFFFFFF00));
++	}
++	return subnets;
++}
++#endif
++
+ /**
+ **  Open an UDP Socket port.
+ **
+diff --git a/src/network/netconnect.cpp b/src/network/netconnect.cpp
+index 48ca4fb27..255cc667e 100644
+--- a/src/network/netconnect.cpp
++++ b/src/network/netconnect.cpp
+@@ -33,6 +33,7 @@
+ // Includes
+ //----------------------------------------------------------------------------
+ 
++#include <chrono>
+ #include <iostream>
+ #include <fstream>
+ #include <set>
+@@ -53,6 +54,7 @@
+ #include "interface.h"
+ #include "map.h"
+ #include "mdns_wrapper.h"
++#include "net_lowlevel.h"
+ #include "network.h"
+ #include "parameters.h"
+ #include "player.h"
+@@ -1738,6 +1740,48 @@ std::vector<int> NetworkRemoteHostIndices()
+ 	return remoteHostIndices;
+ }
+ 
++/*
++** LAN search, which works where routers drop the multicast that mDNS needs.
++** While the host's game menu is open it answers probes on the port after the
++** game port, and joiners send a probe to every address in their subnets.
++*/
++static const std::string LanSearchProbe = "WARDROID?";
++static const std::string LanSearchAnswer = "WARDROID!";
++static const int LanSearchPort = CNetworkParameter::defaultPort + 1;
++
++static void AnswerLanSearch()
++{
++	static Socket beacon = static_cast<Socket>(-1);
++	static bool openFailed = false;
++
++	if (beacon == static_cast<Socket>(-1)) {
++		if (openFailed) {
++			return;
++		}
++		beacon = NetOpenUDP(INADDR_ANY, LanSearchPort);
++		if (beacon == static_cast<Socket>(-1)) {
++			openFailed = true;
++			return;
++		}
++		NetSetNonBlocking(beacon);
++	}
++
++	const std::string probe = LanSearchProbe + GameName;
++	const std::string answer = LanSearchAnswer + GameName + " " + std::to_string(CNetworkParameter::Instance.localPort);
++	char buf[64];
++	while (NetSocketReady(beacon, 0) > 0) {
++		unsigned long host;
++		int port;
++		const int len = NetRecvUDP(beacon, buf, sizeof(buf), &host, &port);
++		if (len < 0) {
++			break;
++		}
++		if (std::string(buf, len) == probe) {
++			NetSendUDP(beacon, host, port, answer.data(), answer.size());
++		}
++	}
++}
++
+ /**
+ ** Server Menu Loop: Send out server request messages
+ */
+@@ -1749,6 +1793,7 @@ void NetworkProcessServerRequest()
+ 	}
+ 
+ 	MdnsService.AnswerServerQueries();
++	AnswerLanSearch();
+ 	Server.Update(FrameCounter);
+ }
+ 
+@@ -2168,12 +2213,99 @@ static int CclNetworkDiscoverServers(lua_State *l)
+ 	return 1;
+ }
+ 
++/**
++**  Probe every address in the local subnets for hosts answering LAN search.
++**  Takes about a second.
++**
++**  @param l  Lua state.
++**
++**  @return Table of "ip:port" strings.
++*/
++static int CclNetworkScanLan(lua_State *l)
++{
++	LuaCheckArgs(l, 0);
++	lua_newtable(l);
++
++	Socket sockfd = NetOpenUDP(INADDR_ANY, 0);
++	if (sockfd == static_cast<Socket>(-1)) {
++		return 1;
++	}
++	const int on = 1;
++	setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, (const char *)&on, sizeof(on));
++
++	std::vector<unsigned long> ownIps;
++	std::vector<unsigned long> targets;
++	for (const auto &[ip, mask] : NetSocketSubnets()) {
++		ownIps.push_back(ip);
++		const uint32_t hostIp = ntohl(ip);
++		uint32_t hostMask = ntohl(mask);
++		// Limit big networks to the 254 addresses around this device.
++		if (hostMask < 0xFFFFFC00) {
++			hostMask = 0xFFFFFF00;
++		}
++		const uint32_t net = hostIp & hostMask;
++		const uint32_t broadcast = net | ~hostMask;
++		for (uint32_t addr = net + 1; addr < broadcast; ++addr) {
++			if (addr != hostIp) {
++				targets.push_back(htonl(addr));
++			}
++		}
++		targets.push_back(htonl(broadcast));
++	}
++
++	const std::string probe = LanSearchProbe + GameName;
++	const std::string answer = LanSearchAnswer + GameName + " ";
++	std::set<std::string> found;
++	// Repeat, as the first packet to a new address can be lost while it is looked up.
++	for (int round = 0; round < 3; ++round) {
++		for (auto target : targets) {
++			NetSendUDP(sockfd, target, LanSearchPort, probe.data(), probe.size());
++		}
++		const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
++		while (true) {
++			const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(until - std::chrono::steady_clock::now()).count();
++			if (left <= 0 || NetSocketReady(sockfd, static_cast<int>(left)) <= 0) {
++				break;
++			}
++			char buf[64];
++			unsigned long host;
++			int port;
++			const int len = NetRecvUDP(sockfd, buf, sizeof(buf), &host, &port);
++			if (len <= 0) {
++				continue;
++			}
++			const std::string reply(buf, len);
++			if (reply.compare(0, answer.size(), answer) != 0
++				|| std::find(ownIps.begin(), ownIps.end(), host) != ownIps.end()) {
++				continue;
++			}
++			const int gamePort = atoi(reply.c_str() + answer.size());
++			if (gamePort <= 0 || gamePort > 65535) {
++				continue;
++			}
++			char ip[24];
++			sprintf(ip, "%d.%d.%d.%d", NIPQUAD(ntohl(host)));
++			found.insert(std::string(ip) + ":" + std::to_string(gamePort));
++		}
++	}
++	NetCloseUDP(sockfd);
++
++	int i = 1;
++	for (const auto &server : found) {
++		lua_pushnumber(l, i++);
++		lua_pushstring(l, server.c_str());
++		lua_settable(l, -3);
++	}
++	return 1;
++}
++
+ 
+ void NetworkCclRegister()
+ {
+ 	lua_register(Lua, "NoRandomPlacementMultiplayer", CclNoRandomPlacementMultiplayer);
+ 	lua_register(Lua, "UsesRandomPlacementMultiplayer", CclUsesRandomPlacementMultiplayer);
+ 	lua_register(Lua, "NetworkDiscoverServers", CclNetworkDiscoverServers);
++	lua_register(Lua, "NetworkScanLan", CclNetworkScanLan);
+ }
+ 
+ 
 diff --git a/src/video/sdl.cpp b/src/video/sdl.cpp
 index 18af13249..04a5abd4c 100644
 --- a/src/video/sdl.cpp

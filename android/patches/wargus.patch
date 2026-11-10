@@ -1,3 +1,79 @@
+diff --git a/scripts/menus/network.lua b/scripts/menus/network.lua
+index 3012cf66..17d4631b 100644
+--- a/scripts/menus/network.lua
++++ b/scripts/menus/network.lua
+@@ -203,6 +203,7 @@ function RunJoinIpMenu()
+   menu:setDrawMenusUnder(true)
+   menu:addLabel(_("Servers: "), 176, 20)
+   local servers = {}
++  local lanServers = {}
+   local function ServerListUpdate()
+     servers = {}
+     if (wc2.preferences.ServerList ~= nil) then
+@@ -210,28 +211,26 @@ function RunJoinIpMenu()
+         servers[i]=tostring(wc2.preferences.ServerList[(i-1)*2+1].." | "..tostring(wc2.preferences.ServerList[(i-1)*2+2]))
+       end
+     end
++    for i,v in ipairs(lanServers) do
++       table.insert(servers, v .. " | (LAN search)")
++    end
+     local newlyDiscovered = NetworkDiscoverServers(true)
+     for i,v in ipairs(newlyDiscovered) do
+        table.insert(servers, v .. " | (auto-discovered)")
+     end
+     if serverlist == nil then
+-       serverlist = menu:addImageListBox(20, 50, 300, 120, servers)
++       serverlist = menu:addImageListBox(20, 50, 300, 90, servers)
+     else
+        serverlist:setList(servers)
+     end
+   end
+   ServerListUpdate()
+-  menu:addFullButton(_("Co~!nnect"), "n", 60, 180, function()
+-      local selected = serverlist:getSelected()
+-      local selectedserver = selected ~= nil and servers[selected + 1] or nil
+-      local ip = selectedserver and string.match(selectedserver, "[0-9%.]+") or nil
+-      if ip == nil then
+-         ErrorMenu(_("No server selected"))
+-         return
+-      end
+-      print("Joining " .. ip)
++  local function JoinServer(server)
++      local ip = string.match(server, "^[0-9%.]+")
++      local port = tonumber(string.match(server, "^[0-9%.]+:(%d+)")) or 0
++      print("Joining " .. server)
+       NetworkDiscoverServers(false)
+-      if (NetworkSetupServerAddress(ip) ~= 0) then
++      if (NetworkSetupServerAddress(ip, port) ~= 0) then
+          ErrorMenu(_("Invalid server name"))
+          return
+       end
+@@ -240,6 +239,25 @@ function RunJoinIpMenu()
+          -- connect failed, don't leave this menu
+          return
+       end
++  end
++  menu:addFullButton(_("~!Search LAN"), "s", 60, 150, function()
++      lanServers = NetworkScanLan()
++      ServerListUpdate()
++      if #lanServers == 0 then
++         ErrorMenu(_("No games found on this network"))
++      elseif #lanServers == 1 then
++         JoinServer(lanServers[1])
++      end
++      -- With several hosts found, the player picks one from the list.
++    end)
++  menu:addFullButton(_("Co~!nnect"), "n", 60, 180, function()
++      local selected = serverlist:getSelected()
++      local selectedserver = selected ~= nil and servers[selected + 1] or nil
++      if selectedserver == nil or string.match(selectedserver, "^[0-9%.]+") == nil then
++         ErrorMenu(_("No server selected"))
++         return
++      end
++      JoinServer(selectedserver)
+     end)
+   menu:addFullButton(_("~!Add server"), "a", 60, 210, function() RunAddServerMenu(); ServerListUpdate() end)
+   -- We need to stop this from loading when there are no servers.
 diff --git a/wartool.cpp b/wartool.cpp
 index 8e6bfa4b..2360c189 100644
 --- a/wartool.cpp
