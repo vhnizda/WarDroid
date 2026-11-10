@@ -1,3 +1,26 @@
+diff --git a/scripts/menus/campaign.lua b/scripts/menus/campaign.lua
+index 216f4d0f..b52e4586 100644
+--- a/scripts/menus/campaign.lua
++++ b/scripts/menus/campaign.lua
+@@ -34,6 +34,10 @@ function Briefing(title, objs, bg, text, voices)
+ 
+   local menu = WarMenu(nil, bg)
+ 
++  -- Keep the music under the narrator's voice.
++  local musicVolume = GetMusicVolume()
++  SetMusicVolume(math.floor(musicVolume / 2))
++
+   wargus.playlist = {}
+   if (CurrentCampaignRace == "human") then
+     Load("scripts/human/ui.lua")
+@@ -109,6 +113,7 @@ function Briefing(title, objs, bg, text, voices)
+   menu:run()
+ 
+   SetGameSpeed(speed)
++  SetMusicVolume(musicVolume)
+ end
+ 
+ function GetCampaignState(campaign)
 diff --git a/scripts/menus/network.lua b/scripts/menus/network.lua
 index 3012cf66..17d4631b 100644
 --- a/scripts/menus/network.lua
