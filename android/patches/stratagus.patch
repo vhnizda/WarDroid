@@ -1,3 +1,19 @@
+diff --git a/src/action/actions.cpp b/src/action/actions.cpp
+index f44cf547b..0a9b57716 100644
+--- a/src/action/actions.cpp
++++ b/src/action/actions.cpp
+@@ -448,6 +448,11 @@ static void HandleUnitAction(CUnit &unit)
+ 					// can happen, but in case it happens again, bring the unit back
+ 					DebugPrint("Dropping out stuck unit\n");
+ 					DropOutOnSide(unit, LookingW, nullptr);
++				} else if (unit.CurrentAction() == UnitAction::Resource && unit.CurrentOrder()->Finished) {
++					// A worker inside a mine or depot was given a new order,
++					// such as stop, while still selected. Bring it out to obey,
++					// or it stays hidden forever.
++					DropOutOnSide(unit, LookingW, unit.Container);
+ 				} else {
+ 					DebugPrint("Flushing removed unit\n");
+ 					// This happens, if building with ALT+SHIFT.
 diff --git a/src/include/net_lowlevel.h b/src/include/net_lowlevel.h
 index 4df2bce7f..0386fc061 100644
 --- a/src/include/net_lowlevel.h
