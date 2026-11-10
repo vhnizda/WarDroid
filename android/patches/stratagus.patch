@@ -88,7 +88,7 @@ index c1b0391b6..ac947b0bb 100644
  **  Open an UDP Socket port.
  **
 diff --git a/src/network/netconnect.cpp b/src/network/netconnect.cpp
-index 48ca4fb27..255cc667e 100644
+index 48ca4fb27..c460f1f11 100644
 --- a/src/network/netconnect.cpp
 +++ b/src/network/netconnect.cpp
 @@ -33,6 +33,7 @@
@@ -164,7 +164,7 @@ index 48ca4fb27..255cc667e 100644
  	Server.Update(FrameCounter);
  }
  
-@@ -2168,12 +2213,99 @@ static int CclNetworkDiscoverServers(lua_State *l)
+@@ -2168,12 +2213,122 @@ static int CclNetworkDiscoverServers(lua_State *l)
  	return 1;
  }
  
@@ -254,6 +254,28 @@ index 48ca4fb27..255cc667e 100644
 +	return 1;
 +}
 +
++/**
++**  Addresses of this device, so a host can tell players what to join.
++**
++**  @param l  Lua state.
++**
++**  @return Table of IP strings.
++*/
++static int CclNetworkLocalIps(lua_State *l)
++{
++	LuaCheckArgs(l, 0);
++	lua_newtable(l);
++	int i = 1;
++	for (auto ip : NetSocketAddr()) {
++		char buf[24];
++		sprintf(buf, "%d.%d.%d.%d", NIPQUAD(ntohl(ip)));
++		lua_pushnumber(l, i++);
++		lua_pushstring(l, buf);
++		lua_settable(l, -3);
++	}
++	return 1;
++}
++
  
  void NetworkCclRegister()
  {
@@ -261,6 +283,7 @@ index 48ca4fb27..255cc667e 100644
  	lua_register(Lua, "UsesRandomPlacementMultiplayer", CclUsesRandomPlacementMultiplayer);
  	lua_register(Lua, "NetworkDiscoverServers", CclNetworkDiscoverServers);
 +	lua_register(Lua, "NetworkScanLan", CclNetworkScanLan);
++	lua_register(Lua, "NetworkLocalIps", CclNetworkLocalIps);
  }
  
  

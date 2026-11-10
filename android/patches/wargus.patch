@@ -22,7 +22,7 @@ index 216f4d0f..b52e4586 100644
  
  function GetCampaignState(campaign)
 diff --git a/scripts/menus/network.lua b/scripts/menus/network.lua
-index 3012cf66..17d4631b 100644
+index 3012cf66..f2349749 100644
 --- a/scripts/menus/network.lua
 +++ b/scripts/menus/network.lua
 @@ -203,6 +203,7 @@ function RunJoinIpMenu()
@@ -97,6 +97,36 @@ index 3012cf66..17d4631b 100644
      end)
    menu:addFullButton(_("~!Add server"), "a", 60, 210, function() RunAddServerMenu(); ServerListUpdate() end)
    -- We need to stop this from loading when there are no servers.
+@@ -448,6 +466,12 @@ function CreateOnlineLobby(map, numplayers, isserver)
+     end
+   end
+ 
++  -- Shown to the host so joining players know what to type.
++  local localIps = table.concat(NetworkLocalIps(), ", ")
++  if localIps == "" then
++    localIps = _("unknown")
++  end
++
+   local teams = {""}
+   for i=1,PlayerMax do
+     if Map.Info.PlayerType[i - 1] == PlayerPerson then
+@@ -518,6 +542,7 @@ function CreateOnlineLobby(map, numplayers, isserver)
+         HBox({ LLabel(_("File:"), "game"), LLabel(map, "game") }),
+         HBox({ LLabel(_("Players:"), "game"), LLabel(numplayers, "game") }),
+         HBox({ LLabel(_("Description:"), "game"), LLabel(_("Unknown map"), "game") }),
++        HBox({ LLabel(_("Your IP:"), "game"):id("ip_caption"), LLabel(localIps, "game"):id("ip_address") }),
+         VBox({ -- game options
+           LCheckBox(_("Fog of war"), function(dd)
+             ServerSetupState.FogOfWar = bool2int(dd:isMarked())
+@@ -615,6 +640,8 @@ function CreateOnlineLobby(map, numplayers, isserver)
+     end
+     menu.checkbox_ready:setVisible(true)
+     menu.button_start_game:setVisible(false)
++    menu.ip_caption:setVisible(false)
++    menu.ip_address:setVisible(false)
+     menu.option_fow:setEnabled(false)
+     menu.option_terrain:setEnabled(false)
+     menu.option_units:setEnabled(false)
 diff --git a/wartool.cpp b/wartool.cpp
 index 8e6bfa4b..2360c189 100644
 --- a/wartool.cpp
