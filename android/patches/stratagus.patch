@@ -304,7 +304,7 @@ index 48ca4fb27..c460f1f11 100644
  
  
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..92e5b2439 100644
+index f4338a07f..ac36b0bec 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
 @@ -707,6 +707,50 @@ void DoRightButton(const PixelPos &mapPixelPos)
@@ -386,6 +386,27 @@ index f4338a07f..92e5b2439 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
+@@ -2159,8 +2224,18 @@ void UIHandleButtonUp(unsigned button)
+ 					SelectSingleUnit(*unit);
+ 					num = 1;
+ 				}
+-			} else {
+-				num = 0;
++			} else if (!KeyModifiers && !GameObserve && !GamePaused && !GameEstablishing
++			           && !Selected.empty()
++			           && ranges::all_of(Selected, [](const CUnit *selected) {
++				              return selected->Player == ThisPlayer && selected->CanMove();
++			              })) {
++				// A click on open ground moves the selected units there, as a
++				// right click does, since touch screens have no right button.
++				const PixelPos cursorMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
++				if (!ClickMissile.empty()) {
++					MakeLocalMissile(MissileTypeByIdent(ClickMissile), cursorMapPos, cursorMapPos);
++				}
++				DoRightButton(cursorMapPos);
+ 			}
+ 		}
+ 
 diff --git a/src/video/sdl.cpp b/src/video/sdl.cpp
 index 18af13249..04a5abd4c 100644
 --- a/src/video/sdl.cpp
