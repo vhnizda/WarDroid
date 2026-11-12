@@ -41,7 +41,7 @@ index c9943b60d..116d6550e 100644
  /*----------------------------------------------------------------------------
  --  Functions
 diff --git a/src/include/interface.h b/src/include/interface.h
-index 1a210eb57..3ab13b39e 100644
+index 1a210eb57..f15dd6747 100644
 --- a/src/include/interface.h
 +++ b/src/include/interface.h
 @@ -43,6 +43,7 @@
@@ -52,7 +52,7 @@ index 1a210eb57..3ab13b39e 100644
  #include <optional>
  #include <vector>
  
-@@ -396,6 +397,20 @@ extern void UpdateTimer();
+@@ -396,6 +397,22 @@ extern void UpdateTimer();
  extern void UpdateStatusLineForButton(const ButtonAction &button);
  /// Draw the Pie Menu
  extern void DrawPieMenu();
@@ -70,6 +70,8 @@ index 1a210eb57..3ab13b39e 100644
 +extern void TouchControlsFinger(const SDL_TouchFingerEvent &event);
 +/// Whether a pinch owns the touches
 +extern bool TouchControlsPinching();
++/// A tap on the map from a finger other than the pointer's
++extern void MapTapAt(const PixelPos &screenPos);
  /// Draw the button popup
  extern void DrawPopup(const ButtonAction &button, const CUIButton &uibutton, int x = 0, int y = 0);
  
@@ -594,10 +596,10 @@ index ec8b15d03..c7b5d82d1 100644
  	// FIXME: peon/peasant with gold/wood & co are considered from
  	//   different type... idem for tankers
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..055afd4d6 100644
+index f4338a07f..89fab983b 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
-@@ -707,6 +707,74 @@ void DoRightButton(const PixelPos &mapPixelPos)
+@@ -707,6 +707,133 @@ void DoRightButton(const PixelPos &mapPixelPos)
  	ShowOrdersCount = GameCycle + Preference.ShowOrders * CYCLES_PER_SECOND;
  }
  
@@ -669,10 +671,69 @@ index f4338a07f..055afd4d6 100644
 +	ShowOrdersCount = GameCycle + Preference.ShowOrders * CYCLES_PER_SECOND;
 +}
 +
++/**
++**  A tap on the map from a finger other than the one driving the pointer,
++**  such as while the other finger holds the joystick. It does what a plain
++**  click there would: a smart click, else select the unit tapped, else move
++**  the selection there.
++**
++**  @param screenPos  Screen position tapped.
++*/
++void MapTapAt(const PixelPos &screenPos)
++{
++	if (GameObserve || GamePaused || GameEstablishing) {
++		return;
++	}
++	CViewport &vp = *UI.SelectedViewport;
++	if (!vp.Contains(screenPos) || !vp.IsInsideMapArea(screenPos)) {
++		return;
++	}
++	const PixelPos mapPixelPos = vp.ScreenToMapPixelPos(screenPos);
++	const Vec2i tilePos = Map.MapPixelPosToTilePos(mapPixelPos);
++
++	CUnit *dest = nullptr;
++	if (ReplayRevealMap || Map.Field(tilePos)->playerInfo.IsExplored(*ThisPlayer)) {
++		dest = UnitOnScreen(mapPixelPos.x, mapPixelPos.y);
++	}
++	if (dest != nullptr && ((!dest->IsVisibleAsGoal(*ThisPlayer) && !ReplayRevealMap)
++	                        || dest->Type->BoolFlag[DECORATION_INDEX].value)) {
++		dest = nullptr;
++	}
++
++	// The orders below look at the unit under the cursor, which belongs to
++	// the other finger.
++	CUnit *const pointerUnit = UnitUnderCursor;
++	UnitUnderCursor = dest;
++	if (IsSmartClick(dest, tilePos)) {
++		DoSmartClick(dest, tilePos, mapPixelPos);
++	} else if (dest != nullptr
++	           && (ReplayRevealMap || Map.Field(tilePos)->playerInfo.IsTeamVisible(*ThisPlayer))) {
++		SelectSingleUnit(*dest);
++		UI.StatusLine.Clear();
++		UI.StatusLine.ClearCosts();
++		CurrentButtonLevel = 0;
++		SelectionChanged();
++		if (dest->Player == ThisPlayer) {
++			PlayUnitSound(*dest, EUnitVoice::Selected);
++		} else {
++			PlayGameSound(GameSounds.Click.Sound.get(), MaxSampleVolume);
++		}
++	} else if (dest == nullptr && !Selected.empty()
++	           && ranges::all_of(Selected, [](const CUnit *unit) {
++		              return unit->Player == ThisPlayer && unit->CanMove();
++	              })) {
++		if (!ClickMissile.empty()) {
++			MakeLocalMissile(MissileTypeByIdent(ClickMissile), mapPixelPos, mapPixelPos);
++		}
++		DoRightButton(mapPixelPos);
++	}
++	UnitUnderCursor = pointerUnit;
++}
++
  /**
  **  Check if the mouse is on a button
  **
-@@ -1000,6 +1068,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
+@@ -1000,6 +1127,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
  		ActionDraw();
  		return;
  	}
@@ -682,7 +743,7 @@ index f4338a07f..055afd4d6 100644
  
  	OldCursorOn = CursorOn;
  	//  Selecting units.
-@@ -1754,6 +1825,8 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+@@ -1754,6 +1884,8 @@ static void UIHandleButtonDown_OnMap(unsigned button)
  			DoRightButton(mapPixelPos);
  		}
  	} else if (MouseButtons & LeftButton) { // enter select mode
@@ -691,7 +752,7 @@ index f4338a07f..055afd4d6 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -1914,6 +1987,15 @@ void UIHandleButtonDown(unsigned button)
+@@ -1914,6 +2046,15 @@ void UIHandleButtonDown(unsigned button)
  		ActionDraw();
  		return;
  	}
@@ -707,7 +768,7 @@ index f4338a07f..055afd4d6 100644
  
  	static bool OldShowSightRange;
  	static bool OldShowReactionRange;
-@@ -1984,6 +2066,9 @@ void UIHandleButtonDown(unsigned button)
+@@ -1984,6 +2125,9 @@ void UIHandleButtonDown(unsigned button)
  */
  void UIHandleButtonUp(unsigned button)
  {
@@ -717,7 +778,7 @@ index f4338a07f..055afd4d6 100644
  	//
  	//  Move map.
  	//
-@@ -2084,10 +2169,9 @@ void UIHandleButtonUp(unsigned button)
+@@ -2084,10 +2228,9 @@ void UIHandleButtonUp(unsigned button)
  	if (CursorState == CursorStates::Rectangle && !(MouseButtons & LeftButton)) { // leave select mode
  		int num = 0;
  		//
@@ -730,7 +791,7 @@ index f4338a07f..055afd4d6 100644
  			PixelPos pos0 = CursorStartMapPos;
  			const PixelPos cursorMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  			PixelPos pos1 = cursorMapPos;
-@@ -2128,7 +2212,13 @@ void UIHandleButtonUp(unsigned button)
+@@ -2128,7 +2271,13 @@ void UIHandleButtonUp(unsigned button)
  
  				unit = UnitOnScreen(cursorMapPos.x, cursorMapPos.y);
  			}
@@ -745,7 +806,7 @@ index f4338a07f..055afd4d6 100644
  				// FIXME: Not nice coded, button number hardcoded!
  				if ((KeyModifiers & ModifierControl)
  					|| (button & (1 << MouseDoubleShift))) {
-@@ -2159,8 +2249,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -2159,8 +2308,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
@@ -768,10 +829,10 @@ index f4338a07f..055afd4d6 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..e07696868
+index 000000000..cb5fc2d83
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,749 @@
+@@ -0,0 +1,791 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -1480,14 +1541,47 @@ index 000000000..e07696868
 +	vp.Set(Vec2i(0, 0), mapTopLeft);
 +}
 +
++/// Longest press and largest wobble that still count as a tap.
++static constexpr Uint32 ExtraTapMs = 600;
++static constexpr double ExtraTapSlop = 12;
++
++/// A finger that went down while another held the joystick. Only the first
++/// finger drives the pointer, so taps from these are handled here.
++struct ExtraFinger
++{
++	PixelPrecise Start;
++	Uint32 Ticks;
++};
++static std::map<SDL_FingerID, ExtraFinger> ExtraFingers;
++
++/// A tap from an extra finger: on a control it presses it, on the map it
++/// does what a tap there would.
++static void ExtraTap(const PixelPrecise &pos)
++{
++	const PixelPos screenPos(static_cast<int>(pos.x), static_cast<int>(pos.y));
++	if (DeselectShown() && IsOnDeselect(screenPos)) {
++		UnSelectAll();
++		NetworkSendSelection(nullptr, 0);
++		SelectionChanged();
++	} else if (const int group = GroupAt(screenPos)) {
++		RecallGroup(group);
++	} else if (!IsOnJoystick(screenPos)) {
++		MapTapAt(screenPos);
++	}
++}
++
 +/**
-+**  Follow the fingers for pinch zoom on the map.
++**  Follow the fingers for pinch zoom on the map, and for taps from a second
++**  finger while the first holds the joystick.
 +*/
 +void TouchControlsFinger(const SDL_TouchFingerEvent &event)
 +{
 +	const PixelPrecise pos(event.x * Video.Width, event.y * Video.Height);
 +	switch (event.type) {
 +		case SDL_FINGERDOWN:
++			if (JoystickHeld && ControlsShown()) {
++				ExtraFingers[event.fingerId] = {pos, SDL_GetTicks()};
++			}
 +			Fingers[event.fingerId] = pos;
 +			if (!Pinching && Fingers.size() == 2 && ControlsShown() && !JoystickHeld && !PressedGroup
 +			    && IsOnMap(Fingers.begin()->second) && IsOnMap(std::next(Fingers.begin())->second)) {
@@ -1501,6 +1595,15 @@ index 000000000..e07696868
 +			}
 +			break;
 +		case SDL_FINGERUP:
++			if (auto extra = ExtraFingers.find(event.fingerId); extra != ExtraFingers.end()) {
++				const ExtraFinger finger = extra->second;
++				ExtraFingers.erase(extra);
++				if (SDL_GetTicks() - finger.Ticks <= ExtraTapMs
++				    && std::hypot(pos.x - finger.Start.x, pos.y - finger.Start.y) <= ExtraTapSlop
++				    && ControlsShown()) {
++					ExtraTap(pos);
++				}
++			}
 +			Fingers.erase(event.fingerId);
 +			if (Fingers.empty()) {
 +				Pinching = false;
