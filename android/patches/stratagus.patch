@@ -356,3 +356,23 @@ index 61b52a3f2..0fc073414 100644
  
  #ifdef WIN32
  #define CCONV __stdcall
+diff --git a/src/video/video.cpp b/src/video/video.cpp
+index ca44880ba..a81271d4d 100644
+--- a/src/video/video.cpp
++++ b/src/video/video.cpp
+@@ -259,6 +259,15 @@ void CVideo::ClearScreen()
+ */
+ bool CVideo::ResizeScreen(int w, int h)
+ {
++#ifdef __ANDROID__
++	// Phones are wider than any of the game's modes. Keep the height and
++	// widen the screen to the display's shape, so nothing is letterboxed.
++	int ww, wh;
++	SDL_GetWindowSize(TheWindow, &ww, &wh);
++	if (ww > 0 && wh > 0) {
++		w = std::max(w, (h * std::max(ww, wh) / std::min(ww, wh)) & ~1);
++	}
++#endif
+ 	if (!(SDL_GetWindowFlags(TheWindow) & SDL_WINDOW_FULLSCREEN_DESKTOP)
+ 		&& Width == WindowWidth
+ 		&& Height == WindowHeight) {
