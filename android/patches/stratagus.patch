@@ -356,6 +356,39 @@ index 1bcd3803b..7ffa33b86 100644
  
  	ColorCycle();
  
+diff --git a/src/stratagus/selection.cpp b/src/stratagus/selection.cpp
+index ec8b15d03..c7b5d82d1 100644
+--- a/src/stratagus/selection.cpp
++++ b/src/stratagus/selection.cpp
+@@ -332,7 +332,7 @@ int ToggleSelectUnit(CUnit &unit)
+ int SelectUnitsByType(CUnit &base)
+ {
+ 	const CUnitType &type = *base.Type;
+-	const CViewport *vp = UI.MouseViewport;
++	[[maybe_unused]] const CViewport *vp = UI.MouseViewport;
+ 
+ 	Assert(UI.MouseViewport);
+ 
+@@ -370,11 +370,19 @@ int SelectUnitsByType(CUnit &base)
+ 	// StephanR: should be (MapX,MapY,MapX+MapWidth-1,MapY+MapHeight-1) ???
+ 	/* FIXME: this should probably be cleaner implemented if SelectUnitsByType()
+ 	 * took parameters of the selection rectangle as arguments */
++#ifdef __ANDROID__
++	// A phone shows little of the map, so take the units within a few tiles
++	// of the clicked one rather than those on screen.
++	constexpr int radius = 10;
++	std::vector<CUnit *> table = SelectAroundUnit(base, radius, HasSameTypeAs(type));
++	ranges::erase_if(table, [&](const CUnit *unit) { return base.MapDistanceTo(*unit) > radius; });
++#else
+ 	const Vec2i offset(1, 1);
+ 	const Vec2i minPos = vp->MapPos - offset;
+ 	const Vec2i vpSize(vp->MapWidth, vp->MapHeight);
+ 	const Vec2i maxPos = vp->MapPos + vpSize + offset;
+ 	std::vector<CUnit *> table = Select(minPos, maxPos, HasSameTypeAs(type));
++#endif
+ 
+ 	// FIXME: peon/peasant with gold/wood & co are considered from
+ 	//   different type... idem for tankers
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
 index f4338a07f..1175c1960 100644
 --- a/src/ui/mouse.cpp
@@ -499,10 +532,10 @@ index f4338a07f..1175c1960 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..f24186d47
+index 000000000..cb79c1711
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,454 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -538,13 +571,17 @@ index 000000000..f24186d47
 +
 +#include "stratagus.h"
 +
++#include "font.h"
 +#include "interface.h"
 +#include "network.h"
++#include "sound.h"
 +#include "ui.h"
 +#include "unit.h"
 +#include "video.h"
 +
 +#include <cmath>
++#include <map>
++#include <string>
 +
 +/*----------------------------------------------------------------------------
 +--  Variables
@@ -567,12 +604,30 @@ index 000000000..f24186d47
 +static constexpr int JoystickDeadZone = 8;
 +/// Map scrolling speed while the joystick is pushed, in pixels per second.
 +static constexpr double JoystickScrollSpeed = 480;
-+/// Size of the deselect button, in screen pixels.
-+static constexpr int DeselectWidth = 44;
-+static constexpr int DeselectHeight = 40;
-+/// The game's blue button, cut down to a box for the deselect button.
-+static constexpr const char *DeselectButtonFile = "ui/human/widgets/button-small-normal.png";
-+static std::shared_ptr<CGraphic> DeselectButton;
++/// Size of the deselect and group buttons, in screen pixels. Big enough
++/// for a thumb.
++static constexpr int ButtonWidth = 77;
++static constexpr int ButtonHeight = 70;
++/// Gap between neighbouring buttons.
++static constexpr int ButtonGap = 6;
++/// Number of group buttons, left of the deselect button.
++static constexpr int GroupButtons = 4;
++/// How long a group button is held to save the selection into it.
++static constexpr Uint32 GroupHoldMs = 600;
++
++/// The game's buttons, cut down to boxes: blue for the deselect button and
++/// groups in use, burgundy for empty groups.
++static constexpr const char *BlueButtonFile = "ui/human/widgets/button-small-normal.png";
++static constexpr const char *BlueButtonPressedFile = "ui/human/widgets/button-small-pressed.png";
++static constexpr const char *RedButtonFile = "ui/orc/widgets/button-small-normal.png";
++static constexpr const char *RedButtonPressedFile = "ui/orc/widgets/button-small-pressed.png";
++static std::map<std::string, std::shared_ptr<CGraphic>> ButtonGraphics;
++
++/// Group button being held, 1 to GroupButtons, or 0.
++static int PressedGroup = 0;
++static Uint32 PressedGroupTicks = 0;
++/// Whether the held group button has already saved the selection.
++static bool PressedGroupSaved = false;
 +/// Gap between the controls and the edge of the map area.
 +static constexpr int ControlMargin = 8;
 +
@@ -592,10 +647,39 @@ index 000000000..f24186d47
 +	                UI.MapArea.EndY - ControlMargin - JoystickRadius);
 +}
 +
++/// Top left of a button slot, counted from the right: 0 is the deselect
++/// button, then groups 4 to 1.
++static PixelPos ButtonTopLeft(int slot)
++{
++	return PixelPos(UI.MapArea.EndX - ControlMargin - ButtonWidth - slot * (ButtonWidth + ButtonGap),
++	                UI.MapArea.EndY - ControlMargin - ButtonHeight);
++}
++
 +static PixelPos DeselectTopLeft()
 +{
-+	return PixelPos(UI.MapArea.EndX - ControlMargin - DeselectWidth,
-+	                UI.MapArea.EndY - ControlMargin - DeselectHeight);
++	return ButtonTopLeft(0);
++}
++
++static PixelPos GroupTopLeft(int group)
++{
++	return ButtonTopLeft(GroupButtons + 1 - group);
++}
++
++static bool IsOnButton(const PixelPos &topLeft, const PixelPos &screenPos)
++{
++	return screenPos.x >= topLeft.x && screenPos.x < topLeft.x + ButtonWidth
++	       && screenPos.y >= topLeft.y && screenPos.y < topLeft.y + ButtonHeight;
++}
++
++/// Group button under the screen position, 1 to GroupButtons, or 0.
++static int GroupAt(const PixelPos &screenPos)
++{
++	for (int group = 1; group <= GroupButtons; ++group) {
++		if (IsOnButton(GroupTopLeft(group), screenPos)) {
++			return group;
++		}
++	}
++	return 0;
 +}
 +
 +static bool ControlsShown()
@@ -616,9 +700,32 @@ index 000000000..f24186d47
 +
 +static bool IsOnDeselect(const PixelPos &screenPos)
 +{
-+	const PixelPos topLeft = DeselectTopLeft();
-+	return screenPos.x >= topLeft.x && screenPos.x < topLeft.x + DeselectWidth
-+	       && screenPos.y >= topLeft.y && screenPos.y < topLeft.y + DeselectHeight;
++	return IsOnButton(DeselectTopLeft(), screenPos);
++}
++
++/// Save the selected units, if they are the player's, into a group.
++static void SaveGroup(int group)
++{
++	if (Selected.empty() || Selected[0]->Player != ThisPlayer) {
++		return;
++	}
++	for (CUnit *unit : Selected) {
++		if (unit->GroupId) {
++			RemoveUnitFromGroups(*unit);
++		}
++	}
++	SetGroup(&Selected[0], Selected.size(), group);
++	PlayGameSound(GameSounds.Click.Sound.get(), MaxSampleVolume);
++}
++
++/// Select the units saved in a group. Dead units have already left it.
++static void RecallGroup(int group)
++{
++	if (GetUnitsOfGroup(group).empty()) {
++		return;
++	}
++	SelectGroup(group);
++	SelectionChanged();
 +}
 +
 +/// Puts the knob under the finger, kept within the base.
@@ -691,36 +798,60 @@ index 000000000..f24186d47
 +	Video.DrawCircleClip(Rgb(40, 40, 46), center.x, center.y, KnobRadius);
 +}
 +
-+/// The game's blue button cut into a box, with a gold X on it.
++/// One of the game's buttons cut into a box.
++static void DrawButtonBox(const char *file, const PixelPos &topLeft)
++{
++	std::shared_ptr<CGraphic> &graphic = ButtonGraphics[file];
++	if (!graphic) {
++		graphic = CGraphic::ForceNew(file);
++		graphic->Load();
++		// Scale to the box's height, then use both ends so it keeps its bevel.
++		graphic->Resize(graphic->Width * ButtonHeight / graphic->Height, ButtonHeight);
++	}
++	const int half = ButtonWidth / 2;
++	graphic->DrawSubClip(0, 0, half, ButtonHeight, topLeft.x, topLeft.y);
++	graphic->DrawSubClip(graphic->Width - (ButtonWidth - half), 0,
++	                     ButtonWidth - half, ButtonHeight, topLeft.x + half, topLeft.y);
++}
++
++/// The blue button with a gold X on it.
 +static void DrawDeselectButton(const PixelPos &topLeft)
 +{
-+	if (!DeselectButton) {
-+		DeselectButton = CGraphic::ForceNew(DeselectButtonFile);
-+		DeselectButton->Load();
-+		// Scale to the box's height, then use both ends so it keeps its bevel.
-+		DeselectButton->Resize(DeselectButton->Width * DeselectHeight / DeselectButton->Height,
-+		                       DeselectHeight);
-+	}
-+	const int half = DeselectWidth / 2;
-+	DeselectButton->DrawSubClip(0, 0, half, DeselectHeight, topLeft.x, topLeft.y);
-+	DeselectButton->DrawSubClip(DeselectButton->Width - (DeselectWidth - half), 0,
-+	                            DeselectWidth - half, DeselectHeight, topLeft.x + half, topLeft.y);
++	DrawButtonBox(BlueButtonFile, topLeft);
 +
-+	const int size = 18;
-+	const PixelPos a(topLeft.x + (DeselectWidth - size) / 2, topLeft.y + (DeselectHeight - size) / 2);
++	const int size = 32;
++	const PixelPos a(topLeft.x + (ButtonWidth - size) / 2, topLeft.y + (ButtonHeight - size) / 2);
 +	const PixelPos b = a + PixelDiff(size, size);
 +	const Uint32 shadow = Rgb(40, 24, 0);
 +	const Uint32 gold = Rgb(252, 204, 52);
 +	const Uint32 shine = Rgb(255, 240, 150);
-+	for (int i = -1; i <= 1; ++i) {
-+		Video.DrawLineClip(shadow, PixelPos(a.x + i + 1, a.y + 1), PixelPos(b.x + i + 1, b.y + 1));
-+		Video.DrawLineClip(shadow, PixelPos(b.x + i + 1, a.y + 1), PixelPos(a.x + i + 1, b.y + 1));
++	for (int i = -2; i <= 2; ++i) {
++		Video.DrawLineClip(shadow, PixelPos(a.x + i + 2, a.y + 2), PixelPos(b.x + i + 2, b.y + 2));
++		Video.DrawLineClip(shadow, PixelPos(b.x + i + 2, a.y + 2), PixelPos(a.x + i + 2, b.y + 2));
 +	}
-+	for (int i = -1; i <= 1; ++i) {
++	for (int i = -2; i <= 2; ++i) {
 +		const Uint32 color = i < 0 ? shine : gold;
 +		Video.DrawLineClip(color, PixelPos(a.x + i, a.y), PixelPos(b.x + i, b.y));
 +		Video.DrawLineClip(color, PixelPos(b.x + i, a.y), PixelPos(a.x + i, b.y));
 +	}
++}
++
++/// A group button: blue when units are saved in it, burgundy when empty.
++static void DrawGroupButton(int group)
++{
++	const bool used = !GetUnitsOfGroup(group).empty();
++	const bool pressed = PressedGroup == group;
++	const char *file = used ? (pressed ? BlueButtonPressedFile : BlueButtonFile)
++	                        : (pressed ? RedButtonPressedFile : RedButtonFile);
++	const PixelPos topLeft = GroupTopLeft(group);
++	DrawButtonBox(file, topLeft);
++
++	const CFont *font = CFont::Get("large");
++	const CLabel label(font ? *font : GetGameFont());
++	const int shift = pressed ? 1 : 0;
++	label.DrawCentered(topLeft.x + ButtonWidth / 2 + shift,
++	                   topLeft.y + (ButtonHeight - label.Height()) / 2 + shift,
++	                   std::to_string(group));
 +}
 +
 +/**
@@ -735,6 +866,9 @@ index 000000000..f24186d47
 +	DrawShield(center);
 +	DrawBoss(center + KnobOffset);
 +
++	for (int group = 1; group <= GroupButtons; ++group) {
++		DrawGroupButton(group);
++	}
 +	if (DeselectShown()) {
 +		DrawDeselectButton(DeselectTopLeft());
 +	}
@@ -750,9 +884,15 @@ index 000000000..f24186d47
 +	if (!ControlsShown()) {
 +		return false;
 +	}
-+	// Holding the joystick still sends a long press, which mustn't start
++	// Holding a control still sends a long press, which mustn't start
 +	// a selection box.
-+	if (JoystickHeld) {
++	if (JoystickHeld || PressedGroup) {
++		return true;
++	}
++	if (const int group = GroupAt(screenPos)) {
++		PressedGroup = group;
++		PressedGroupTicks = SDL_GetTicks();
++		PressedGroupSaved = false;
 +		return true;
 +	}
 +	if (DeselectShown() && IsOnDeselect(screenPos)) {
@@ -778,6 +918,9 @@ index 000000000..f24186d47
 +*/
 +bool TouchControlsMouseMove(const PixelPos &screenPos)
 +{
++	if (PressedGroup) {
++		return true;
++	}
 +	if (!JoystickHeld) {
 +		return false;
 +	}
@@ -786,12 +929,20 @@ index 000000000..f24186d47
 +}
 +
 +/**
-+**  Let go of the joystick.
++**  Let go of the joystick or a group button. A short press on a group
++**  button selects its units.
 +**
-+**  @return  True if the joystick was held and the release must not reach the map.
++**  @return  True if a control was held and the release must not reach the map.
 +*/
 +bool TouchControlsButtonUp()
 +{
++	if (PressedGroup) {
++		if (!PressedGroupSaved) {
++			RecallGroup(PressedGroup);
++		}
++		PressedGroup = 0;
++		return true;
++	}
 +	if (!JoystickHeld) {
 +		return false;
 +	}
@@ -806,6 +957,12 @@ index 000000000..f24186d47
 +*/
 +void TouchControlsScroll()
 +{
++	// Save into a group once its button has been held long enough, so the
++	// button turns blue while the finger is still on it.
++	if (PressedGroup && !PressedGroupSaved && SDL_GetTicks() - PressedGroupTicks >= GroupHoldMs) {
++		SaveGroup(PressedGroup);
++		PressedGroupSaved = true;
++	}
 +	if (!JoystickHeld) {
 +		return;
 +	}
