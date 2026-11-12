@@ -39,10 +39,18 @@ index c9943b60d..f1299f73f 100644
  /*----------------------------------------------------------------------------
  --  Functions
 diff --git a/src/include/interface.h b/src/include/interface.h
-index 1a210eb57..638600429 100644
+index 1a210eb57..3ab13b39e 100644
 --- a/src/include/interface.h
 +++ b/src/include/interface.h
-@@ -396,6 +396,16 @@ extern void UpdateTimer();
+@@ -43,6 +43,7 @@
+ #include "unitsound.h"
+ #include "vec2i.h"
+ 
++#include <SDL.h>
+ #include <optional>
+ #include <vector>
+ 
+@@ -396,6 +397,20 @@ extern void UpdateTimer();
  extern void UpdateStatusLineForButton(const ButtonAction &button);
  /// Draw the Pie Menu
  extern void DrawPieMenu();
@@ -56,6 +64,10 @@ index 1a210eb57..638600429 100644
 +extern bool TouchControlsButtonUp();
 +/// Scroll the map while the joystick is pushed
 +extern void TouchControlsScroll();
++/// Follow the fingers for pinch zoom on the map
++extern void TouchControlsFinger(const SDL_TouchFingerEvent &event);
++/// Whether a pinch owns the touches
++extern bool TouchControlsPinching();
  /// Draw the button popup
  extern void DrawPopup(const ButtonAction &button, const CUIButton &uibutton, int x = 0, int y = 0);
  
@@ -80,6 +92,184 @@ index 4df2bce7f..0386fc061 100644
  /// Get local hostname
  extern std::string NetGetHostname();
  
+diff --git a/src/include/viewport.h b/src/include/viewport.h
+index 734f5fe14..1f8c96b35 100644
+--- a/src/include/viewport.h
++++ b/src/include/viewport.h
+@@ -144,6 +144,8 @@ class CViewport
+ 	 */
+ 	template<bool graphicalTileIsLogicalTile>
+ 	void DrawMapBackgroundInViewport(const fieldHighlightChecker highlightChecker = nullptr) const;
++	/// Draw the viewport at map scale off screen, then scaled onto the screen
++	void DrawZoomed(const fieldHighlightChecker highlightChecker);
+ 	/// Draw the map fog of war
+ 	void DrawMapFogOfWar();
+ 	/// Adjust fog of war surface to viewport
+@@ -163,8 +165,12 @@ class CViewport
+ 	int MapHeight = 0;            /// Height in map tiles
+ 
+ 	CUnit *Unit = nullptr;        /// Bound to this unit
++	/// Screen pixels per map pixel. Below 1 shows more of the map, above 1
++	/// shows it larger. MapWidth and MapHeight follow it.
++	double Zoom = 1.0;
+ private:
+ 	SDL_Surface *FogSurface { nullptr }; /// Texture for fog of war. Viewport sized.
++	SDL_Surface *ZoomSurface { nullptr }; /// Map-scale canvas while zoomed
+ 
+ 	static bool ShowGrid;
+ 	static bool ShowAStarPassability;
+diff --git a/src/map/map_draw.cpp b/src/map/map_draw.cpp
+index 5b0eccbea..c6cd04393 100644
+--- a/src/map/map_draw.cpp
++++ b/src/map/map_draw.cpp
+@@ -47,6 +47,7 @@
+ #include "video.h"
+ #include "editor.h"
+ 
++#include <cmath>
+ #include <cstdlib>
+ 
+ bool CViewport::ShowGrid = false;
+@@ -70,9 +71,14 @@ void CViewport::Restrict(int &screenPosX, int &screenPosY) const
+ 	clamp(&screenPosY, this->GetTopLeftPos().y, this->GetBottomRightPos().y - 1);
+ }
+ 
++/// Size of the part of the map shown, in map pixels.
+ PixelSize CViewport::GetPixelSize() const
+ {
+-	return this->BottomRightPos - this->TopLeftPos;
++	const PixelSize screenSize = this->BottomRightPos - this->TopLeftPos;
++	if (this->Zoom == 1.0) {
++		return screenSize;
++	}
++	return PixelSize(static_cast<int>(screenSize.x / this->Zoom), static_cast<int>(screenSize.y / this->Zoom));
+ }
+ 
+ void CViewport::SetClipping() const
+@@ -123,7 +129,12 @@ bool CViewport::IsInsideMapArea(const PixelPos &screenPixelPos) const
+ // Convert viewport coordinates into map pixel coordinates
+ PixelPos CViewport::ScreenToMapPixelPos(const PixelPos &screenPixelPos) const
+ {
+-	const PixelDiff relPos = screenPixelPos - this->TopLeftPos + this->Offset;
++	PixelDiff screenRel = screenPixelPos - this->TopLeftPos;
++	if (this->Zoom != 1.0) {
++		screenRel = PixelDiff(static_cast<int>(std::floor(screenRel.x / this->Zoom)),
++		                      static_cast<int>(std::floor(screenRel.y / this->Zoom)));
++	}
++	const PixelDiff relPos = screenRel + this->Offset;
+ 	const PixelPos mapPixelPos = relPos + Map.TilePosToMapPixelPos_TopLeft(this->MapPos);
+ 
+ 	return mapPixelPos;
+@@ -132,9 +143,12 @@ PixelPos CViewport::ScreenToMapPixelPos(const PixelPos &screenPixelPos) const
+ // Convert map pixel coordinates into viewport coordinates
+ PixelPos CViewport::MapToScreenPixelPos(const PixelPos &mapPixelPos) const
+ {
+-	const PixelDiff relPos = mapPixelPos - Map.TilePosToMapPixelPos_TopLeft(this->MapPos);
+-
+-	return this->TopLeftPos + relPos - this->Offset;
++	PixelDiff relPos = mapPixelPos - Map.TilePosToMapPixelPos_TopLeft(this->MapPos) - this->Offset;
++	if (this->Zoom != 1.0) {
++		relPos = PixelDiff(static_cast<int>(std::floor(relPos.x * this->Zoom)),
++		                   static_cast<int>(std::floor(relPos.y * this->Zoom)));
++	}
++	return this->TopLeftPos + relPos;
+ }
+ 
+ /// convert screen coordinate into tilepos
+@@ -423,6 +437,10 @@ static void ShowUnitName(const CViewport &vp, PixelPos pos, CUnit *unit, bool hi
+ */
+ void CViewport::Draw(const fieldHighlightChecker highlightChecker /* = nullptr */)
+ {
++	if (this->Zoom != 1.0) {
++		DrawZoomed(highlightChecker);
++		return;
++	}
+ 	PushClipping();
+ 	this->SetClipping();
+ 
+@@ -566,6 +584,67 @@ void CViewport::Draw(const fieldHighlightChecker highlightChecker /* = nullptr *
+ 	PopClipping();
+ }
+ 
++/**
++**  Draw a zoomed viewport. Everything is drawn as usual, at map scale, onto
++**  a canvas the size of the map area shown, standing in for the screen; the
++**  canvas is then scaled into the viewport on the real screen.
++*/
++void CViewport::DrawZoomed(const fieldHighlightChecker highlightChecker)
++{
++	const PixelPos screenTopLeft = this->TopLeftPos;
++	const PixelPos screenBottomRight = this->BottomRightPos;
++	const double zoom = this->Zoom;
++	const int screenWidth = screenBottomRight.x - screenTopLeft.x + 1;
++	const int screenHeight = screenBottomRight.y - screenTopLeft.y + 1;
++	const int width = static_cast<int>(std::ceil(screenWidth / zoom));
++	const int height = static_cast<int>(std::ceil(screenHeight / zoom));
++
++	if (!ZoomSurface || ZoomSurface->w != width || ZoomSurface->h != height) {
++		if (ZoomSurface) {
++			SDL_FreeSurface(ZoomSurface);
++		}
++		ZoomSurface = SDL_CreateRGBSurface(0, width, height, 32, TheScreen->format->Rmask,
++		                                   TheScreen->format->Gmask, TheScreen->format->Bmask, 0);
++		if (!ZoomSurface) {
++			return;
++		}
++	}
++	SDL_FillRect(ZoomSurface, nullptr, 0);
++
++	// The line drawing code takes the screen's width as its pitch.
++	SDL_Surface *screen = TheScreen;
++	const int videoWidth = Video.Width;
++	const int videoHeight = Video.Height;
++	TheScreen = ZoomSurface;
++	Video.Width = width;
++	Video.Height = height;
++	this->TopLeftPos = PixelPos(0, 0);
++	this->BottomRightPos = PixelPos(width - 1, height - 1);
++	this->Zoom = 1.0;
++	this->Set(this->MapPos, this->Offset);
++
++	PushClipping();
++	::SetClipping(0, 0, width - 1, height - 1);
++	this->Draw(highlightChecker);
++	PopClipping();
++
++	TheScreen = screen;
++	Video.Width = videoWidth;
++	Video.Height = videoHeight;
++	this->TopLeftPos = screenTopLeft;
++	this->BottomRightPos = screenBottomRight;
++	this->Zoom = zoom;
++	this->Set(this->MapPos, this->Offset);
++
++	SDL_Rect src = {0, 0, width, height};
++	SDL_Rect dst = {screenTopLeft.x, screenTopLeft.y, static_cast<int>(width * zoom),
++	                static_cast<int>(height * zoom)};
++	SDL_Rect clip = {screenTopLeft.x, screenTopLeft.y, screenWidth, screenHeight};
++	SDL_SetClipRect(TheScreen, &clip);
++	SDL_BlitScaled(ZoomSurface, &src, TheScreen, &dst);
++	SDL_SetClipRect(TheScreen, nullptr);
++}
++
+ /**
+ **  Draw border around the viewport
+ */
+diff --git a/src/map/map_fog.cpp b/src/map/map_fog.cpp
+index e8edb2e51..33ff0ca32 100644
+--- a/src/map/map_fog.cpp
++++ b/src/map/map_fog.cpp
+@@ -447,6 +447,10 @@ void CViewport::Clean()
+ 	if (this->FogSurface) {
+ 		CleanFog();
+ 	}
++	if (this->ZoomSurface) {
++		SDL_FreeSurface(this->ZoomSurface);
++		this->ZoomSurface = nullptr;
++	}
+ }
+ 
+ void CViewport::CleanFog()
 diff --git a/src/network/net_lowlevel.cpp b/src/network/net_lowlevel.cpp
 index c1b0391b6..ac947b0bb 100644
 --- a/src/network/net_lowlevel.cpp
@@ -402,7 +592,7 @@ index ec8b15d03..c7b5d82d1 100644
  	// FIXME: peon/peasant with gold/wood & co are considered from
  	//   different type... idem for tankers
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..ce1bd2db2 100644
+index f4338a07f..33fb54056 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
 @@ -707,6 +707,57 @@ void DoRightButton(const PixelPos &mapPixelPos)
@@ -501,10 +691,14 @@ index f4338a07f..ce1bd2db2 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -1914,6 +1989,11 @@ void UIHandleButtonDown(unsigned button)
+@@ -1914,6 +1989,15 @@ void UIHandleButtonDown(unsigned button)
  		ActionDraw();
  		return;
  	}
++	// Holding two fingers still to pinch sends a long press.
++	if (TouchControlsPinching()) {
++		return;
++	}
 +	// Before the long press check: holding a control must not show ranges.
 +	if (CursorState != CursorStates::Rectangle && (MouseButtons & LeftButton)
 +	    && TouchControlsButtonDown(CursorScreenPos)) {
@@ -513,7 +707,7 @@ index f4338a07f..ce1bd2db2 100644
  
  	static bool OldShowSightRange;
  	static bool OldShowReactionRange;
-@@ -1984,6 +2064,9 @@ void UIHandleButtonDown(unsigned button)
+@@ -1984,6 +2068,9 @@ void UIHandleButtonDown(unsigned button)
  */
  void UIHandleButtonUp(unsigned button)
  {
@@ -523,7 +717,7 @@ index f4338a07f..ce1bd2db2 100644
  	//
  	//  Move map.
  	//
-@@ -2159,8 +2242,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -2159,8 +2246,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
@@ -546,10 +740,10 @@ index f4338a07f..ce1bd2db2 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..d05e562e0
+index 000000000..e07696868
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,550 @@
+@@ -0,0 +1,749 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -585,8 +779,10 @@ index 000000000..d05e562e0
 +
 +#include "stratagus.h"
 +
++#include "cursor.h"
 +#include "font.h"
 +#include "interface.h"
++#include "map.h"
 +#include "network.h"
 +#include "sound.h"
 +#include "ui.h"
@@ -609,14 +805,16 @@ index 000000000..d05e562e0
 +#endif
 +
 +/// Joystick shield radius and knob (shield boss) radius, in screen pixels.
-+static constexpr int JoystickRadius = 40;
-+static constexpr int KnobRadius = 14;
++static constexpr int JoystickRadius = 80;
++static constexpr int KnobRadius = 28;
 +/// Width of the iron rim around the shield.
-+static constexpr int RimWidth = 4;
++static constexpr int RimWidth = 8;
 +/// Distance between the shield's planks.
-+static constexpr int PlankWidth = 13;
++static constexpr int PlankWidth = 26;
 +/// Knob travel below which the joystick doesn't scroll.
-+static constexpr int JoystickDeadZone = 8;
++static constexpr int JoystickDeadZone = 16;
++/// Opacity of the joystick, so the map shows through it.
++static constexpr Uint8 JoystickAlpha = 128;
 +/// Map scrolling speed while the joystick is pushed, in pixels per second.
 +static constexpr double JoystickScrollSpeed = 480;
 +/// Size of the deselect and group buttons, in screen pixels. Big enough
@@ -760,7 +958,6 @@ index 000000000..d05e562e0
 +	return Video.MapRGB(TheScreen->format, r, g, b);
 +}
 +
-+/// A round wooden shield of vertical planks with an iron rim and rivets.
 +/// Repeatable pseudo-random value from 0 to 1 for a pixel or a plank.
 +static double Noise(int x, int y, int seed)
 +{
@@ -769,20 +966,55 @@ index 000000000..d05e562e0
 +	return ((h ^ (h >> 16)) & 0xffff) / 65535.0;
 +}
 +
-+/// The shield's planks and iron rim, painted once pixel by pixel: wavy
-+/// grain along each plank, a tone and knots that differ per plank, seams,
-+/// light from the top left and an antialiased edge.
++static Uint32 Argb(const SDL_Surface *surface, double r, double g, double b, double a = 1.0)
++{
++	return SDL_MapRGBA(surface->format,
++	                   Uint8(std::clamp(r, 0.0, 255.0)),
++	                   Uint8(std::clamp(g, 0.0, 255.0)),
++	                   Uint8(std::clamp(b, 0.0, 255.0)),
++	                   Uint8(std::clamp(a, 0.0, 1.0) * 255));
++}
++
++static SDL_Surface *MakeSurface(int size)
++{
++	SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, size, size, 32, SDL_PIXELFORMAT_ARGB8888);
++	if (surface) {
++		SDL_FillRect(surface, nullptr, 0);
++		SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_BLEND);
++		SDL_SetSurfaceAlphaMod(surface, JoystickAlpha);
++	}
++	return surface;
++}
++
++/// A line some pixels thick, drawn into a surface.
++static void SurfaceLine(SDL_Surface *surface, PixelPos a, PixelPos b, int thickness, Uint32 color)
++{
++	const int steps = std::max(std::abs(b.x - a.x), std::abs(b.y - a.y));
++	for (int i = 0; i <= steps; ++i) {
++		const int x = a.x + (steps ? (b.x - a.x) * i / steps : 0);
++		const int y = a.y + (steps ? (b.y - a.y) * i / steps : 0);
++		SDL_Rect dot = {x - thickness / 2, y - thickness / 2, thickness, thickness};
++		SDL_FillRect(surface, &dot, color);
++	}
++}
++
++/// A round wooden shield of vertical planks with an iron rim and rivets,
++/// painted once pixel by pixel: wavy grain along each plank, a tone and
++/// knots that differ per plank, seams, light from the top left, an
++/// antialiased edge, and arrow heads around the boss so it reads as a knob
++/// that can be pushed.
 +static SDL_Surface *MakeShieldSurface()
 +{
 +	const int size = 2 * JoystickRadius + 1;
-+	SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, size, size, 32, SDL_PIXELFORMAT_ARGB8888);
++	SDL_Surface *surface = MakeSurface(size);
 +	if (!surface) {
 +		return nullptr;
 +	}
-+	SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_BLEND);
 +	Uint32 *pixels = static_cast<Uint32 *>(surface->pixels);
 +	const int pitch = surface->pitch / 4;
 +	const int wood = JoystickRadius - RimWidth;
++	// The texture was designed for a shield of radius 40.
++	const double scale = JoystickRadius / 40.0;
 +
 +	for (int y = 0; y < size; ++y) {
 +		for (int x = 0; x < size; ++x) {
@@ -792,119 +1024,160 @@ index 000000000..d05e562e0
 +			const double alpha = std::clamp(JoystickRadius + 0.5 - r, 0.0, 1.0);
 +			// 1 at the top left, -1 at the bottom right.
 +			const double light = -(dx + dy) / (JoystickRadius * M_SQRT2);
-+			double red;
-+			double green;
-+			double blue;
++			double v;
 +			if (r > wood) {
 +				// Iron, bevelled: bright outer edge facing the light, dark
 +				// inner edge where it meets the wood.
 +				const double t = (r - wood) / RimWidth;
-+				double v = 0.40 + 0.16 * light + (Noise(x, y, 7) - 0.5) * 0.08;
-+				if (t > 0.7) {
++				v = 0.40 + 0.16 * light + (Noise(x, y, 7) - 0.5) * 0.08;
++				if (t > 0.75) {
 +					v += 0.18 * light + 0.06;
-+				} else if (t < 0.35) {
++				} else if (t < 0.3) {
 +					v -= 0.14;
 +				}
-+				red = green = v * 255;
-+				blue = v * 255 + 8;
-+			} else {
-+				const int plank = (dx + wood) / PlankWidth;
-+				const int px = (dx + wood) % PlankWidth;
-+				const double seed = plank * 2.39;
-+				const double tone = 0.88 + 0.24 * Noise(plank, 0, 3);
-+				const double wave = 1.6 * std::sin(dy * 0.11 + seed) + 0.7 * std::sin(dy * 0.37 + seed * 2);
-+				const double grain = 0.5 + 0.5 * std::sin((px + wave) * 1.9 + seed);
-+				double v = tone * (0.84 + 0.2 * grain);
-+
-+				if (Noise(plank, 2, 9) > 0.35) {
-+					const double kx = 3 + Noise(plank, 4, 13) * (PlankWidth - 6);
-+					const double ky = (Noise(plank, 1, 5) - 0.5) * 1.3 * wood;
-+					const double kd = std::hypot(px - kx, (dy - ky) * 0.45);
-+					if (kd < 1.5) {
-+						v *= 0.5;
-+					} else if (kd < 4.5) {
-+						v *= 0.86 + 0.12 * std::sin(kd * 2.8);
-+					}
-+				}
-+				v *= 1 + (Noise(x, y, 11) - 0.5) * 0.1;
-+				if (px == 0) {
-+					v *= 0.5;
-+				} else if (px == 1) {
-+					v *= 1.15;
-+				}
-+				v *= 1 + 0.2 * light;
-+				// Darker toward the rim, as if the face were slightly domed.
-+				v *= 1 - 0.32 * std::pow(r / wood, 4);
-+				red = 156 * v;
-+				green = 100 * v;
-+				blue = 52 * v;
++				pixels[y * pitch + x] = Argb(surface, v * 255, v * 255, v * 255 + 8, alpha);
++				continue;
 +			}
-+			pixels[y * pitch + x] = SDL_MapRGBA(surface->format,
-+			                                    Uint8(std::clamp(red, 0.0, 255.0)),
-+			                                    Uint8(std::clamp(green, 0.0, 255.0)),
-+			                                    Uint8(std::clamp(blue, 0.0, 255.0)),
-+			                                    Uint8(alpha * 255));
++			const int plank = (dx + wood) / PlankWidth;
++			const int px = (dx + wood) % PlankWidth;
++			const double seed = plank * 2.39;
++			const double tone = 0.88 + 0.24 * Noise(plank, 0, 3);
++			const double wave = scale * (1.6 * std::sin(dy * 0.11 / scale + seed)
++			                             + 0.7 * std::sin(dy * 0.37 / scale + seed * 2));
++			const double grain = 0.5 + 0.5 * std::sin((px + wave) * 1.9 / scale + seed);
++			const double fine = 0.5 + 0.5 * std::sin((px + wave * 0.5) * 4.1 + seed * 3);
++			v = tone * (0.82 + 0.16 * grain + 0.06 * fine);
++
++			if (Noise(plank, 2, 9) > 0.35) {
++				const double kx = 3 * scale + Noise(plank, 4, 13) * (PlankWidth - 6 * scale);
++				const double ky = (Noise(plank, 1, 5) - 0.5) * 1.3 * wood;
++				const double kd = std::hypot(px - kx, (dy - ky) * 0.45) / scale;
++				if (kd < 1.5) {
++					v *= 0.5;
++				} else if (kd < 4.5) {
++					v *= 0.86 + 0.12 * std::sin(kd * 2.8);
++				}
++			}
++			v *= 1 + (Noise(x, y, 11) - 0.5) * 0.1;
++			if (px < scale) {
++				v *= 0.5;
++			} else if (px < 2 * scale) {
++				v *= 1.15;
++			}
++			v *= 1 + 0.2 * light;
++			// Darker toward the rim, as if the face were slightly domed.
++			v *= 1 - 0.32 * std::pow(r / wood, 4);
++			pixels[y * pitch + x] = Argb(surface, 156 * v, 100 * v, 52 * v, alpha);
 +		}
 +	}
 +
 +	// Domed rivets on the rim: lit top left, shadowed bottom right.
-+	const Uint32 rivetShadow = SDL_MapRGBA(surface->format, 30, 30, 34, 255);
-+	const Uint32 rivetBody = SDL_MapRGBA(surface->format, 168, 164, 150, 255);
-+	const Uint32 rivetShine = SDL_MapRGBA(surface->format, 240, 236, 220, 255);
++	const int rivet = static_cast<int>(scale + 0.5);
 +	for (int i = 0; i < 8; ++i) {
 +		const double angle = i * M_PI / 4 + M_PI / 8;
 +		const double r = JoystickRadius - RimWidth / 2.0;
 +		const int cx = JoystickRadius + int(std::lround(r * std::cos(angle)));
 +		const int cy = JoystickRadius + int(std::lround(r * std::sin(angle)));
-+		pixels[(cy + 1) * pitch + cx + 1] = rivetShadow;
-+		pixels[cy * pitch + cx + 1] = rivetShadow;
-+		pixels[(cy + 1) * pitch + cx] = rivetShadow;
-+		pixels[cy * pitch + cx] = rivetBody;
-+		pixels[(cy - 1) * pitch + cx] = rivetBody;
-+		pixels[cy * pitch + cx - 1] = rivetBody;
-+		pixels[(cy - 1) * pitch + cx - 1] = rivetShine;
++		for (int y = -2 * rivet; y <= 2 * rivet; ++y) {
++			for (int x = -2 * rivet; x <= 2 * rivet; ++x) {
++				const double d = std::hypot(x, y) / (1.6 * rivet);
++				if (d > 1) {
++					continue;
++				}
++				const double shade = 0.55 + 0.45 * (-(x + y) / (2.0 * rivet * M_SQRT2)) + 0.25 * (1 - d);
++				pixels[(cy + y) * pitch + cx + x] = Argb(surface, 210 * shade, 205 * shade, 188 * shade);
++			}
++		}
++	}
++
++	// Arrow heads pointing up, right, down and left.
++	const int tip = wood - static_cast<int>(3 * scale);
++	const int base = KnobRadius + static_cast<int>(4 * scale);
++	const int spread = static_cast<int>(6 * scale);
++	const int thickness = static_cast<int>(scale);
++	const Uint32 shadow = Argb(surface, 60, 34, 12);
++	const Uint32 gold = Argb(surface, 244, 214, 150);
++	const PixelDiff directions[] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
++	const PixelPos center(JoystickRadius, JoystickRadius);
++	for (const auto &[color, shift] : {std::pair(shadow, PixelDiff(thickness, thickness)),
++	                                    std::pair(gold, PixelDiff(0, 0))}) {
++		for (const PixelDiff &d : directions) {
++			const PixelDiff side(-d.y, d.x);
++			const PixelPos a = center + d * tip + shift;
++			const PixelPos b = center + d * base + side * spread + shift;
++			const PixelPos c = center + d * base - side * spread + shift;
++			SurfaceLine(surface, a, b, thickness, color);
++			SurfaceLine(surface, b, c, thickness, color);
++			SurfaceLine(surface, c, a, thickness, color);
++		}
 +	}
 +	return surface;
++}
++
++/// The shield's iron boss, a shaded metal dome with a soft shadow below it.
++static SDL_Surface *MakeBossSurface()
++{
++	const int shadowShift = KnobRadius / 6;
++	const int size = 2 * KnobRadius + 1 + shadowShift;
++	SDL_Surface *surface = MakeSurface(size);
++	if (!surface) {
++		return nullptr;
++	}
++	Uint32 *pixels = static_cast<Uint32 *>(surface->pixels);
++	const int pitch = surface->pitch / 4;
++	// Light from the top left and slightly in front.
++	const double lx = -0.5;
++	const double ly = -0.6;
++	const double lz = 0.62;
++
++	for (int y = 0; y < size; ++y) {
++		for (int x = 0; x < size; ++x) {
++			const double dx = x - KnobRadius;
++			const double dy = y - KnobRadius;
++			const double r = std::hypot(dx, dy) / KnobRadius;
++			if (r <= 1.0) {
++				const double nz = std::sqrt(std::max(0.0, 1 - r * r));
++				const double diffuse = std::max(0.0, (dx / KnobRadius) * lx + (dy / KnobRadius) * ly + nz * lz);
++				const double shine = std::pow(diffuse, 24);
++				double v = 50 + 150 * diffuse + 120 * shine;
++				// A dark ring where the dome meets the shield.
++				if (r > 0.9) {
++					v *= 0.6;
++				}
++				const double alpha = std::clamp((1.0 - r) * KnobRadius + 0.5, 0.0, 1.0);
++				pixels[y * pitch + x] = Argb(surface, v, v, v + 8, alpha);
++			} else {
++				const double sr = std::hypot(dx - shadowShift, dy - shadowShift) / KnobRadius;
++				if (sr <= 1.0) {
++					pixels[y * pitch + x] = Argb(surface, 0, 0, 0, 0.45 * (1 - sr * sr));
++				}
++			}
++		}
++	}
++	return surface;
++}
++
++static void BlitCentered(SDL_Surface *surface, const PixelPos &center, int radius)
++{
++	if (surface) {
++		SDL_Rect dst = {center.x - radius, center.y - radius, surface->w, surface->h};
++		SDL_BlitSurface(surface, nullptr, TheScreen, &dst);
++	}
 +}
 +
 +static void DrawShield(const PixelPos &center)
 +{
 +	static SDL_Surface *shield = MakeShieldSurface();
-+	if (shield) {
-+		SDL_Rect dst = {center.x - JoystickRadius, center.y - JoystickRadius, shield->w, shield->h};
-+		SDL_BlitSurface(shield, nullptr, TheScreen, &dst);
-+	}
-+	const int wood = JoystickRadius - RimWidth;
-+
-+	// Arrow heads pointing up, right, down and left, so the boss reads as a
-+	// knob that can be pushed.
-+	const int tip = wood - 3;
-+	const int base = KnobRadius + 4;
-+	const int spread = 6;
-+	const PixelDiff directions[] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
-+	for (const PixelDiff &d : directions) {
-+		const PixelDiff side(-d.y, d.x);
-+		const PixelPos a = center + d * tip;
-+		const PixelPos b = center + d * base + side * spread;
-+		const PixelPos c = center + d * base - side * spread;
-+		for (const auto &[color, shift] : {std::pair(Rgb(60, 34, 12), PixelDiff(1, 1)),
-+		                                    std::pair(Rgb(244, 214, 150), PixelDiff(0, 0))}) {
-+			Video.DrawLineClip(color, a + shift, b + shift);
-+			Video.DrawLineClip(color, b + shift, c + shift);
-+			Video.DrawLineClip(color, c + shift, a + shift);
-+		}
-+	}
++	BlitCentered(shield, center, JoystickRadius);
 +}
 +
 +/// The shield's iron boss, which is the knob that moves.
 +static void DrawBoss(const PixelPos &center)
 +{
-+	Video.FillCircleClip(Rgb(24, 24, 28), center + PixelDiff(1, 2), KnobRadius);
-+	Video.FillCircleClip(Rgb(112, 112, 120), center, KnobRadius);
-+	Video.FillCircleClip(Rgb(150, 150, 158), center - PixelDiff(2, 2), KnobRadius - 5);
-+	Video.FillCircleClip(Rgb(210, 210, 216), center - PixelDiff(5, 5), 3);
-+	Video.DrawCircleClip(Rgb(40, 40, 46), center.x, center.y, KnobRadius);
++	static SDL_Surface *boss = MakeBossSurface();
++	BlitCentered(boss, center, KnobRadius);
 +}
++
 +
 +/// One of the game's buttons cut into a box.
 +static void DrawButtonBox(const char *file, const PixelPos &topLeft)
@@ -1088,15 +1361,135 @@ index 000000000..d05e562e0
 +	if (length < JoystickDeadZone) {
 +		return;
 +	}
-+	ScrollRemainderX += KnobOffset.x / length * JoystickScrollSpeed * seconds;
-+	ScrollRemainderY += KnobOffset.y / length * JoystickScrollSpeed * seconds;
++	// Even speed on screen, whatever the zoom.
++	CViewport *vp = UI.SelectedViewport;
++	ScrollRemainderX += KnobOffset.x / length * JoystickScrollSpeed * seconds / vp->Zoom;
++	ScrollRemainderY += KnobOffset.y / length * JoystickScrollSpeed * seconds / vp->Zoom;
 +	const PixelDiff step(static_cast<int>(ScrollRemainderX), static_cast<int>(ScrollRemainderY));
 +	ScrollRemainderX -= step.x;
 +	ScrollRemainderY -= step.y;
 +	if (step.x || step.y) {
-+		CViewport *vp = UI.SelectedViewport;
 +		vp->Set(vp->MapPos, vp->Offset + step);
 +	}
++}
++
++/*----------------------------------------------------------------------------
++--  Pinch zoom
++----------------------------------------------------------------------------*/
++
++/// Most the map can be enlarged.
++static constexpr double MaxZoom = 2.0;
++/// Zoom this close to 1 snaps to 1, where drawing is cheapest.
++static constexpr double ZoomSnap = 0.05;
++
++/// Fingers on the screen, in screen pixels.
++static std::map<SDL_FingerID, PixelPrecise> Fingers;
++/// A pinch is under way: set when a second finger lands on the map, and
++/// kept until every finger has left the screen.
++static bool Pinching = false;
++static double PinchStartDistance = 0;
++static double PinchStartZoom = 1;
++/// The map point under the middle of the two fingers, kept under them.
++static PixelPrecise PinchAnchor;
++
++/// Smallest zoom: the whole map width or height fills the view, whichever
++/// comes first, and never smaller than the map's normal size if it fits.
++static double MinZoom(const CViewport &vp)
++{
++	const PixelSize screen = vp.GetBottomRightPos() - vp.GetTopLeftPos();
++	const double fitX = double(screen.x) / (Map.Info.MapWidth * PixelTileSize.x);
++	const double fitY = double(screen.y) / (Map.Info.MapHeight * PixelTileSize.y);
++	return std::min(1.0, std::max(fitX, fitY));
++}
++
++static std::pair<PixelPrecise, double> PinchMiddleAndDistance()
++{
++	auto it = Fingers.begin();
++	const PixelPrecise a = it->second;
++	const PixelPrecise b = (++it)->second;
++	return {PixelPrecise((a.x + b.x) / 2, (a.y + b.y) / 2), std::hypot(a.x - b.x, a.y - b.y)};
++}
++
++static bool IsOnMap(const PixelPrecise &pos)
++{
++	const PixelPos screenPos(static_cast<int>(pos.x), static_cast<int>(pos.y));
++	return UI.SelectedViewport->Contains(screenPos) && !IsOnJoystick(screenPos)
++	       && !GroupAt(screenPos) && !(DeselectShown() && IsOnDeselect(screenPos));
++}
++
++static void StartPinch()
++{
++	CViewport &vp = *UI.SelectedViewport;
++	const auto [middle, distance] = PinchMiddleAndDistance();
++	if (distance < 1) {
++		return;
++	}
++	Pinching = true;
++	PinchStartDistance = distance;
++	PinchStartZoom = vp.Zoom;
++	const PixelPos mapTopLeft = Map.TilePosToMapPixelPos_TopLeft(vp.MapPos) + vp.Offset;
++	PinchAnchor = PixelPrecise(mapTopLeft.x + (middle.x - vp.GetTopLeftPos().x) / vp.Zoom,
++	                         mapTopLeft.y + (middle.y - vp.GetTopLeftPos().y) / vp.Zoom);
++	vp.Unit = nullptr;
++	// The first finger already pressed the mouse: forget the selection box
++	// or anything else it began.
++	CursorState = CursorStates::Point;
++	GameCursor = UI.Point.Cursor;
++}
++
++static void UpdatePinch()
++{
++	CViewport &vp = *UI.SelectedViewport;
++	const auto [middle, distance] = PinchMiddleAndDistance();
++	double zoom = std::clamp(PinchStartZoom * distance / PinchStartDistance, MinZoom(vp), MaxZoom);
++	if (std::abs(zoom - 1.0) < ZoomSnap) {
++		zoom = 1.0;
++	}
++	vp.Zoom = zoom;
++	// Keep the anchor under the fingers, so the pinch also pans.
++	const PixelDiff mapTopLeft(static_cast<int>(PinchAnchor.x - (middle.x - vp.GetTopLeftPos().x) / zoom),
++	                           static_cast<int>(PinchAnchor.y - (middle.y - vp.GetTopLeftPos().y) / zoom));
++	vp.Set(Vec2i(0, 0), mapTopLeft);
++}
++
++/**
++**  Follow the fingers for pinch zoom on the map.
++*/
++void TouchControlsFinger(const SDL_TouchFingerEvent &event)
++{
++	const PixelPrecise pos(event.x * Video.Width, event.y * Video.Height);
++	switch (event.type) {
++		case SDL_FINGERDOWN:
++			Fingers[event.fingerId] = pos;
++			if (!Pinching && Fingers.size() == 2 && ControlsShown() && !JoystickHeld && !PressedGroup
++			    && IsOnMap(Fingers.begin()->second) && IsOnMap(std::next(Fingers.begin())->second)) {
++				StartPinch();
++			}
++			break;
++		case SDL_FINGERMOTION:
++			Fingers[event.fingerId] = pos;
++			if (Pinching && Fingers.size() == 2 && ControlsShown()) {
++				UpdatePinch();
++			}
++			break;
++		case SDL_FINGERUP:
++			Fingers.erase(event.fingerId);
++			if (Fingers.empty()) {
++				Pinching = false;
++			}
++			break;
++		default:
++			break;
++	}
++}
++
++/**
++**  Whether a pinch owns the touches, so the mouse events made from the
++**  first finger must be ignored.
++*/
++bool TouchControlsPinching()
++{
++	return Pinching;
 +}
 +
 +//@}
@@ -1134,18 +1527,20 @@ index e25044acd..616d9687d 100644
  	if (!Preference.HardwareCursor) {
  		const PixelPos pos = CursorScreenPos - GameCursor->HotPos;
 diff --git a/src/video/sdl.cpp b/src/video/sdl.cpp
-index 18af13249..2fe98bcbf 100644
+index 18af13249..5d84545ce 100644
 --- a/src/video/sdl.cpp
 +++ b/src/video/sdl.cpp
-@@ -36,6 +36,7 @@
+@@ -36,7 +36,9 @@
  
  #include "stratagus.h"
  
 +#include "cursor.h"
  #include "game.h"
++#include "interface.h"
  #include "network.h"
  #include "online_service.h"
-@@ -340,7 +341,14 @@ void InitVideoSdl()
+ #include "parameters.h"
+@@ -340,7 +342,14 @@ void InitVideoSdl()
  		}
  
  		SDL_CUSTOM_KEY_UP = SDL_RegisterEvents(1);
@@ -1160,7 +1555,7 @@ index 18af13249..2fe98bcbf 100644
  
  		// Clean up on exit
  		atexit(CleanUpVideoSdl);
-@@ -428,7 +436,8 @@ void InitVideoSdl()
+@@ -428,7 +437,8 @@ void InitVideoSdl()
  		if (strlen(rendererInfo.name) == 0) {
  			dummyRenderer = true;
  		}
@@ -1170,18 +1565,33 @@ index 18af13249..2fe98bcbf 100644
  			LoadShaderExtensions();
  		}
  	}
-@@ -573,6 +582,7 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+@@ -572,7 +582,19 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+ 	unsigned int keysym = 0;
  
  	switch (event.type) {
++		case SDL_FINGERDOWN:
++		case SDL_FINGERMOTION:
++		case SDL_FINGERUP:
++			TouchControlsFinger(event.tfinger);
++			break;
++
  		case SDL_MOUSEBUTTONDOWN:
++			// While two fingers pinch, the first one's mouse presses and
++			// moves do nothing. Its release still arrives, to end the press.
++			if (event.button.which == SDL_TOUCH_MOUSEID && TouchControlsPinching()) {
++				break;
++			}
 +			CursorFromTouch = event.button.which == SDL_TOUCH_MOUSEID;
  			event.button.y = static_cast<int>(std::floor(event.button.y / Video.VerticalPixelSize + 0.5));
  			InputMouseButtonPress(callbacks, SDL_GetTicks(), event.button.button);
  			break;
-@@ -583,6 +593,11 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+@@ -583,6 +605,14 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
  			break;
  
  		case SDL_MOUSEMOTION:
++			if (event.motion.which == SDL_TOUCH_MOUSEID && TouchControlsPinching()) {
++				break;
++			}
 +			// The window sends a motion event without movement at startup,
 +			// which says nothing about a mouse being there.
 +			if (event.motion.xrel || event.motion.yrel) {
@@ -1215,18 +1625,26 @@ index 61b52a3f2..0fc073414 100644
  #ifdef WIN32
  #define CCONV __stdcall
 diff --git a/src/video/video.cpp b/src/video/video.cpp
-index ca44880ba..a81271d4d 100644
+index ca44880ba..6f72abf57 100644
 --- a/src/video/video.cpp
 +++ b/src/video/video.cpp
-@@ -259,6 +259,15 @@ void CVideo::ClearScreen()
+@@ -259,6 +259,23 @@ void CVideo::ClearScreen()
  */
  bool CVideo::ResizeScreen(int w, int h)
  {
 +#ifdef __ANDROID__
 +	// Phones are wider than any of the game's modes. Keep the height and
 +	// widen the screen to the display's shape, so nothing is letterboxed.
-+	int ww, wh;
-+	SDL_GetWindowSize(TheWindow, &ww, &wh);
++	// The display, not the window: at startup the window can still leave
++	// room for the system bars, which then hide.
++	int ww = 0, wh = 0;
++	SDL_DisplayMode mode;
++	if (SDL_GetDesktopDisplayMode(0, &mode) == 0) {
++		ww = mode.w;
++		wh = mode.h;
++	} else {
++		SDL_GetWindowSize(TheWindow, &ww, &wh);
++	}
 +	if (ww > 0 && wh > 0) {
 +		w = std::max(w, (h * std::max(ww, wh) / std::min(ww, wh)) & ~1);
 +	}
