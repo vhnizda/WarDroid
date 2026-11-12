@@ -357,25 +357,32 @@ index 1bcd3803b..7ffa33b86 100644
  	ColorCycle();
  
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..b6cf5d6e3 100644
+index f4338a07f..1175c1960 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
-@@ -707,6 +707,50 @@ void DoRightButton(const PixelPos &mapPixelPos)
+@@ -707,6 +707,57 @@ void DoRightButton(const PixelPos &mapPixelPos)
  	ShowOrdersCount = GameCycle + Preference.ShowOrders * CYCLES_PER_SECOND;
  }
  
 +/**
-+**  Check if a left click should order the selected workers instead of
-+**  selecting what is under the cursor: harvest a mine or trees, or repair
-+**  a damaged building. Touch screens have no right button to do this.
++**  Check if a left click should order the selected units instead of
++**  selecting what is under the cursor: attack an enemy, or for workers,
++**  harvest a mine or trees, or repair a damaged building. Touch screens
++**  have no right button to do this.
 +**
 +**  @param dest  Unit under the cursor, or null.
 +**  @param pos   Map tile clicked.
 +*/
-+static bool IsWorkerSmartClick(const CUnit *dest, const Vec2i &pos)
++static bool IsSmartClick(const CUnit *dest, const Vec2i &pos)
 +{
 +	if (Selected.empty() || KeyModifiers || GameObserve || GamePaused || GameEstablishing) {
 +		return false;
++	}
++	if (!ranges::all_of(Selected, [](const CUnit *unit) { return unit->Player == ThisPlayer; })) {
++		return false;
++	}
++	if (dest != nullptr && ThisPlayer->IsEnemy(*dest) && dest->IsVisibleAsGoal(*ThisPlayer)) {
++		return ranges::any_of(Selected, [](const CUnit *unit) { return unit->Type->CanAttack; });
 +	}
 +	bool useful = false;
 +	for (const CUnit *unit : Selected) {
@@ -411,7 +418,7 @@ index f4338a07f..b6cf5d6e3 100644
  /**
  **  Check if the mouse is on a button
  **
-@@ -1000,6 +1044,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
+@@ -1000,6 +1051,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
  		ActionDraw();
  		return;
  	}
@@ -421,7 +428,7 @@ index f4338a07f..b6cf5d6e3 100644
  
  	OldCursorOn = CursorOn;
  	//  Selecting units.
-@@ -1754,6 +1801,27 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+@@ -1754,6 +1808,27 @@ static void UIHandleButtonDown_OnMap(unsigned button)
  			DoRightButton(mapPixelPos);
  		}
  	} else if (MouseButtons & LeftButton) { // enter select mode
@@ -431,8 +438,8 @@ index f4338a07f..b6cf5d6e3 100644
 +				dest = nullptr;
 +			}
 +			const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
-+			if (IsWorkerSmartClick(dest, tilePos)) {
-+				// Every worker goes for the clicked tile, without the
++			if (IsSmartClick(dest, tilePos)) {
++				// Every unit goes for the clicked tile, without the
 +				// formation offsets that a right click on open ground uses.
 +				if (dest == nullptr && !ClickMissile.empty()) {
 +					const PixelPos mapPixelPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
@@ -449,7 +456,7 @@ index f4338a07f..b6cf5d6e3 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -1946,6 +2014,9 @@ void UIHandleButtonDown(unsigned button)
+@@ -1946,6 +2021,9 @@ void UIHandleButtonDown(unsigned button)
  	if (CursorState == CursorStates::Rectangle) {
  		return;
  	}
@@ -459,7 +466,7 @@ index f4338a07f..b6cf5d6e3 100644
  	// CursorOn should have changed with BigMapMode, so recompute it.
  	HandleMouseOn(CursorScreenPos);
  	//  Selecting target. (Move,Attack,Patrol,... commands);
-@@ -1984,6 +2055,9 @@ void UIHandleButtonDown(unsigned button)
+@@ -1984,6 +2062,9 @@ void UIHandleButtonDown(unsigned button)
  */
  void UIHandleButtonUp(unsigned button)
  {
@@ -469,7 +476,7 @@ index f4338a07f..b6cf5d6e3 100644
  	//
  	//  Move map.
  	//
-@@ -2159,8 +2233,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -2159,8 +2240,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
@@ -492,10 +499,10 @@ index f4338a07f..b6cf5d6e3 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..b4b43799c
+index 000000000..f24186d47
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,311 @@
+@@ -0,0 +1,330 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -652,6 +659,25 @@ index 000000000..b4b43799c
 +		const PixelPos rivet(center.x + static_cast<int>(std::lround(r * std::cos(angle))),
 +		                     center.y + static_cast<int>(std::lround(r * std::sin(angle))));
 +		Video.FillCircleClip(Rgb(196, 192, 176), rivet, 1);
++	}
++
++	// Arrow heads pointing up, right, down and left, so the boss reads as a
++	// knob that can be pushed.
++	const int tip = wood - 3;
++	const int base = KnobRadius + 4;
++	const int spread = 6;
++	const PixelDiff directions[] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
++	for (const PixelDiff &d : directions) {
++		const PixelDiff side(-d.y, d.x);
++		const PixelPos a = center + d * tip;
++		const PixelPos b = center + d * base + side * spread;
++		const PixelPos c = center + d * base - side * spread;
++		for (const auto &[color, shift] : {std::pair(Rgb(60, 34, 12), PixelDiff(1, 1)),
++		                                    std::pair(Rgb(244, 214, 150), PixelDiff(0, 0))}) {
++			Video.DrawLineClip(color, a + shift, b + shift);
++			Video.DrawLineClip(color, b + shift, c + shift);
++			Video.DrawLineClip(color, c + shift, a + shift);
++		}
 +	}
 +}
 +
