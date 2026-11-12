@@ -128,7 +128,7 @@ index 3012cf66..f2349749 100644
      menu.option_terrain:setEnabled(false)
      menu.option_units:setEnabled(false)
 diff --git a/scripts/stratagus.lua b/scripts/stratagus.lua
-index 4811fa6b..f3aec74c 100644
+index 4811fa6b..99ff719c 100644
 --- a/scripts/stratagus.lua
 +++ b/scripts/stratagus.lua
 @@ -392,7 +392,7 @@ local defaultPreferences = {
@@ -140,6 +140,15 @@ index 4811fa6b..f3aec74c 100644
  	DoubleClickDelayInMs = 300,     --  For the wanted double-click delay (in ms).
  	EffectsEnabled = true,
  	EffectsVolume = 128,
+@@ -405,7 +405,7 @@ local defaultPreferences = {
+ 	GrabMouse = false,              --  Enable/disable grabbing the mouse.
+ 	GroupKeys = "0123456789`",
+ 	HoldClickDelayInMs = 1000,      --  For the wanted hold-click delay (in ms).
+-	KeepRatio = true,               -- Keep background image ratio in menu
++	KeepRatio = false,              -- Stretch menu backgrounds to fill wide phone screens
+ 	KeyScrollSpeed = 4,
+ 	LastDifficulty = 2,
+ 	LeaveStopScrolling = true,      --  Enable/disable stopping scrolling when mouse leave.
 diff --git a/wartool.cpp b/wartool.cpp
 index 8e6bfa4b..2360c189 100644
 --- a/wartool.cpp
