@@ -532,10 +532,10 @@ index f4338a07f..1175c1960 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..cb79c1711
+index 000000000..dd4a27310
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,454 @@
+@@ -0,0 +1,548 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -579,6 +579,7 @@ index 000000000..cb79c1711
 +#include "unit.h"
 +#include "video.h"
 +
++#include <algorithm>
 +#include <cmath>
 +#include <map>
 +#include <string>
@@ -746,27 +747,120 @@ index 000000000..cb79c1711
 +}
 +
 +/// A round wooden shield of vertical planks with an iron rim and rivets.
-+static void DrawShield(const PixelPos &center)
++/// Repeatable pseudo-random value from 0 to 1 for a pixel or a plank.
++static double Noise(int x, int y, int seed)
 +{
-+	Video.FillCircleClip(Rgb(58, 58, 64), center, JoystickRadius);
-+	Video.FillCircleClip(Rgb(132, 84, 40), center, JoystickRadius - RimWidth);
++	Uint32 h = Uint32(x) * 374761393u + Uint32(y) * 668265263u + Uint32(seed) * 1442695041u;
++	h = (h ^ (h >> 13)) * 1274126177u;
++	return ((h ^ (h >> 16)) & 0xffff) / 65535.0;
++}
 +
-+	const int wood = JoystickRadius - RimWidth;
-+	for (int dx = -wood + PlankWidth; dx < wood; dx += PlankWidth) {
-+		const int half = static_cast<int>(std::sqrt(double(wood * wood - dx * dx)));
-+		Video.DrawVLineClip(Rgb(84, 50, 22), center.x + dx, center.y - half, 2 * half);
-+		Video.DrawVLineClip(Rgb(162, 110, 58), center.x + dx + 1, center.y - half, 2 * half);
++/// The shield's planks and iron rim, painted once pixel by pixel: wavy
++/// grain along each plank, a tone and knots that differ per plank, seams,
++/// light from the top left and an antialiased edge.
++static SDL_Surface *MakeShieldSurface()
++{
++	const int size = 2 * JoystickRadius + 1;
++	SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, size, size, 32, SDL_PIXELFORMAT_ARGB8888);
++	if (!surface) {
++		return nullptr;
 +	}
-+	Video.DrawCircleClip(Rgb(124, 124, 132), center.x, center.y, JoystickRadius - 1);
-+	Video.DrawCircleClip(Rgb(32, 32, 36), center.x, center.y, JoystickRadius - RimWidth);
++	SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_BLEND);
++	Uint32 *pixels = static_cast<Uint32 *>(surface->pixels);
++	const int pitch = surface->pitch / 4;
++	const int wood = JoystickRadius - RimWidth;
 +
++	for (int y = 0; y < size; ++y) {
++		for (int x = 0; x < size; ++x) {
++			const int dx = x - JoystickRadius;
++			const int dy = y - JoystickRadius;
++			const double r = std::sqrt(double(dx * dx + dy * dy));
++			const double alpha = std::clamp(JoystickRadius + 0.5 - r, 0.0, 1.0);
++			// 1 at the top left, -1 at the bottom right.
++			const double light = -(dx + dy) / (JoystickRadius * M_SQRT2);
++			double red;
++			double green;
++			double blue;
++			if (r > wood) {
++				// Iron, bevelled: bright outer edge facing the light, dark
++				// inner edge where it meets the wood.
++				const double t = (r - wood) / RimWidth;
++				double v = 0.40 + 0.16 * light + (Noise(x, y, 7) - 0.5) * 0.08;
++				if (t > 0.7) {
++					v += 0.18 * light + 0.06;
++				} else if (t < 0.35) {
++					v -= 0.14;
++				}
++				red = green = v * 255;
++				blue = v * 255 + 8;
++			} else {
++				const int plank = (dx + wood) / PlankWidth;
++				const int px = (dx + wood) % PlankWidth;
++				const double seed = plank * 2.39;
++				const double tone = 0.88 + 0.24 * Noise(plank, 0, 3);
++				const double wave = 1.6 * std::sin(dy * 0.11 + seed) + 0.7 * std::sin(dy * 0.37 + seed * 2);
++				const double grain = 0.5 + 0.5 * std::sin((px + wave) * 1.9 + seed);
++				double v = tone * (0.84 + 0.2 * grain);
++
++				if (Noise(plank, 2, 9) > 0.35) {
++					const double kx = 3 + Noise(plank, 4, 13) * (PlankWidth - 6);
++					const double ky = (Noise(plank, 1, 5) - 0.5) * 1.3 * wood;
++					const double kd = std::hypot(px - kx, (dy - ky) * 0.45);
++					if (kd < 1.5) {
++						v *= 0.5;
++					} else if (kd < 4.5) {
++						v *= 0.86 + 0.12 * std::sin(kd * 2.8);
++					}
++				}
++				v *= 1 + (Noise(x, y, 11) - 0.5) * 0.1;
++				if (px == 0) {
++					v *= 0.5;
++				} else if (px == 1) {
++					v *= 1.15;
++				}
++				v *= 1 + 0.2 * light;
++				// Darker toward the rim, as if the face were slightly domed.
++				v *= 1 - 0.32 * std::pow(r / wood, 4);
++				red = 156 * v;
++				green = 100 * v;
++				blue = 52 * v;
++			}
++			pixels[y * pitch + x] = SDL_MapRGBA(surface->format,
++			                                    Uint8(std::clamp(red, 0.0, 255.0)),
++			                                    Uint8(std::clamp(green, 0.0, 255.0)),
++			                                    Uint8(std::clamp(blue, 0.0, 255.0)),
++			                                    Uint8(alpha * 255));
++		}
++	}
++
++	// Domed rivets on the rim: lit top left, shadowed bottom right.
++	const Uint32 rivetShadow = SDL_MapRGBA(surface->format, 30, 30, 34, 255);
++	const Uint32 rivetBody = SDL_MapRGBA(surface->format, 168, 164, 150, 255);
++	const Uint32 rivetShine = SDL_MapRGBA(surface->format, 240, 236, 220, 255);
 +	for (int i = 0; i < 8; ++i) {
 +		const double angle = i * M_PI / 4 + M_PI / 8;
-+		const int r = JoystickRadius - RimWidth / 2;
-+		const PixelPos rivet(center.x + static_cast<int>(std::lround(r * std::cos(angle))),
-+		                     center.y + static_cast<int>(std::lround(r * std::sin(angle))));
-+		Video.FillCircleClip(Rgb(196, 192, 176), rivet, 1);
++		const double r = JoystickRadius - RimWidth / 2.0;
++		const int cx = JoystickRadius + int(std::lround(r * std::cos(angle)));
++		const int cy = JoystickRadius + int(std::lround(r * std::sin(angle)));
++		pixels[(cy + 1) * pitch + cx + 1] = rivetShadow;
++		pixels[cy * pitch + cx + 1] = rivetShadow;
++		pixels[(cy + 1) * pitch + cx] = rivetShadow;
++		pixels[cy * pitch + cx] = rivetBody;
++		pixels[(cy - 1) * pitch + cx] = rivetBody;
++		pixels[cy * pitch + cx - 1] = rivetBody;
++		pixels[(cy - 1) * pitch + cx - 1] = rivetShine;
 +	}
++	return surface;
++}
++
++static void DrawShield(const PixelPos &center)
++{
++	static SDL_Surface *shield = MakeShieldSurface();
++	if (shield) {
++		SDL_Rect dst = {center.x - JoystickRadius, center.y - JoystickRadius, shield->w, shield->h};
++		SDL_BlitSurface(shield, nullptr, TheScreen, &dst);
++	}
++	const int wood = JoystickRadius - RimWidth;
 +
 +	// Arrow heads pointing up, right, down and left, so the boss reads as a
 +	// knob that can be pushed.
