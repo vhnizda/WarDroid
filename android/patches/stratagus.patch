@@ -492,10 +492,10 @@ index f4338a07f..b6cf5d6e3 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..838fcedf2
+index 000000000..b4b43799c
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,311 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -549,15 +549,23 @@ index 000000000..838fcedf2
 +static constexpr bool TouchControlsEnabled = false;
 +#endif
 +
-+/// Joystick base radius and knob radius, in screen pixels.
++/// Joystick shield radius and knob (shield boss) radius, in screen pixels.
 +static constexpr int JoystickRadius = 40;
-+static constexpr int KnobRadius = 16;
++static constexpr int KnobRadius = 14;
++/// Width of the iron rim around the shield.
++static constexpr int RimWidth = 4;
++/// Distance between the shield's planks.
++static constexpr int PlankWidth = 13;
 +/// Knob travel below which the joystick doesn't scroll.
 +static constexpr int JoystickDeadZone = 8;
 +/// Map scrolling speed while the joystick is pushed, in pixels per second.
 +static constexpr double JoystickScrollSpeed = 480;
-+/// Side of the deselect button, in screen pixels.
-+static constexpr int DeselectSize = 32;
++/// Size of the deselect button, in screen pixels.
++static constexpr int DeselectWidth = 44;
++static constexpr int DeselectHeight = 40;
++/// The game's blue button, cut down to a box for the deselect button.
++static constexpr const char *DeselectButtonFile = "ui/human/widgets/button-small-normal.png";
++static std::shared_ptr<CGraphic> DeselectButton;
 +/// Gap between the controls and the edge of the map area.
 +static constexpr int ControlMargin = 8;
 +
@@ -579,8 +587,8 @@ index 000000000..838fcedf2
 +
 +static PixelPos DeselectTopLeft()
 +{
-+	return PixelPos(UI.MapArea.EndX - ControlMargin - DeselectSize,
-+	                UI.MapArea.EndY - ControlMargin - DeselectSize);
++	return PixelPos(UI.MapArea.EndX - ControlMargin - DeselectWidth,
++	                UI.MapArea.EndY - ControlMargin - DeselectHeight);
 +}
 +
 +static bool ControlsShown()
@@ -602,8 +610,8 @@ index 000000000..838fcedf2
 +static bool IsOnDeselect(const PixelPos &screenPos)
 +{
 +	const PixelPos topLeft = DeselectTopLeft();
-+	return screenPos.x >= topLeft.x && screenPos.x < topLeft.x + DeselectSize
-+	       && screenPos.y >= topLeft.y && screenPos.y < topLeft.y + DeselectSize;
++	return screenPos.x >= topLeft.x && screenPos.x < topLeft.x + DeselectWidth
++	       && screenPos.y >= topLeft.y && screenPos.y < topLeft.y + DeselectHeight;
 +}
 +
 +/// Puts the knob under the finger, kept within the base.
@@ -618,6 +626,77 @@ index 000000000..838fcedf2
 +	KnobOffset = d;
 +}
 +
++static Uint32 Rgb(Uint8 r, Uint8 g, Uint8 b)
++{
++	return Video.MapRGB(TheScreen->format, r, g, b);
++}
++
++/// A round wooden shield of vertical planks with an iron rim and rivets.
++static void DrawShield(const PixelPos &center)
++{
++	Video.FillCircleClip(Rgb(58, 58, 64), center, JoystickRadius);
++	Video.FillCircleClip(Rgb(132, 84, 40), center, JoystickRadius - RimWidth);
++
++	const int wood = JoystickRadius - RimWidth;
++	for (int dx = -wood + PlankWidth; dx < wood; dx += PlankWidth) {
++		const int half = static_cast<int>(std::sqrt(double(wood * wood - dx * dx)));
++		Video.DrawVLineClip(Rgb(84, 50, 22), center.x + dx, center.y - half, 2 * half);
++		Video.DrawVLineClip(Rgb(162, 110, 58), center.x + dx + 1, center.y - half, 2 * half);
++	}
++	Video.DrawCircleClip(Rgb(124, 124, 132), center.x, center.y, JoystickRadius - 1);
++	Video.DrawCircleClip(Rgb(32, 32, 36), center.x, center.y, JoystickRadius - RimWidth);
++
++	for (int i = 0; i < 8; ++i) {
++		const double angle = i * M_PI / 4 + M_PI / 8;
++		const int r = JoystickRadius - RimWidth / 2;
++		const PixelPos rivet(center.x + static_cast<int>(std::lround(r * std::cos(angle))),
++		                     center.y + static_cast<int>(std::lround(r * std::sin(angle))));
++		Video.FillCircleClip(Rgb(196, 192, 176), rivet, 1);
++	}
++}
++
++/// The shield's iron boss, which is the knob that moves.
++static void DrawBoss(const PixelPos &center)
++{
++	Video.FillCircleClip(Rgb(24, 24, 28), center + PixelDiff(1, 2), KnobRadius);
++	Video.FillCircleClip(Rgb(112, 112, 120), center, KnobRadius);
++	Video.FillCircleClip(Rgb(150, 150, 158), center - PixelDiff(2, 2), KnobRadius - 5);
++	Video.FillCircleClip(Rgb(210, 210, 216), center - PixelDiff(5, 5), 3);
++	Video.DrawCircleClip(Rgb(40, 40, 46), center.x, center.y, KnobRadius);
++}
++
++/// The game's blue button cut into a box, with a gold X on it.
++static void DrawDeselectButton(const PixelPos &topLeft)
++{
++	if (!DeselectButton) {
++		DeselectButton = CGraphic::ForceNew(DeselectButtonFile);
++		DeselectButton->Load();
++		// Scale to the box's height, then use both ends so it keeps its bevel.
++		DeselectButton->Resize(DeselectButton->Width * DeselectHeight / DeselectButton->Height,
++		                       DeselectHeight);
++	}
++	const int half = DeselectWidth / 2;
++	DeselectButton->DrawSubClip(0, 0, half, DeselectHeight, topLeft.x, topLeft.y);
++	DeselectButton->DrawSubClip(DeselectButton->Width - (DeselectWidth - half), 0,
++	                            DeselectWidth - half, DeselectHeight, topLeft.x + half, topLeft.y);
++
++	const int size = 18;
++	const PixelPos a(topLeft.x + (DeselectWidth - size) / 2, topLeft.y + (DeselectHeight - size) / 2);
++	const PixelPos b = a + PixelDiff(size, size);
++	const Uint32 shadow = Rgb(40, 24, 0);
++	const Uint32 gold = Rgb(252, 204, 52);
++	const Uint32 shine = Rgb(255, 240, 150);
++	for (int i = -1; i <= 1; ++i) {
++		Video.DrawLineClip(shadow, PixelPos(a.x + i + 1, a.y + 1), PixelPos(b.x + i + 1, b.y + 1));
++		Video.DrawLineClip(shadow, PixelPos(b.x + i + 1, a.y + 1), PixelPos(a.x + i + 1, b.y + 1));
++	}
++	for (int i = -1; i <= 1; ++i) {
++		const Uint32 color = i < 0 ? shine : gold;
++		Video.DrawLineClip(color, PixelPos(a.x + i, a.y), PixelPos(b.x + i, b.y));
++		Video.DrawLineClip(color, PixelPos(b.x + i, a.y), PixelPos(a.x + i, b.y));
++	}
++}
++
 +/**
 +**  Draw the joystick and, when units are selected, the deselect button.
 +*/
@@ -627,24 +706,11 @@ index 000000000..838fcedf2
 +		return;
 +	}
 +	const PixelPos center = JoystickCenter();
-+	Video.FillTransCircleClip(ColorBlack, center.x, center.y, JoystickRadius, 96);
-+	Video.DrawTransCircleClip(ColorWhite, center.x, center.y, JoystickRadius, 160);
-+	Video.FillTransCircleClip(ColorWhite, center.x + KnobOffset.x, center.y + KnobOffset.y,
-+	                          KnobRadius, JoystickHeld ? 200 : 128);
++	DrawShield(center);
++	DrawBoss(center + KnobOffset);
 +
 +	if (DeselectShown()) {
-+		const PixelPos p = DeselectTopLeft();
-+		Video.FillTransRectangleClip(ColorBlack, p.x, p.y, DeselectSize, DeselectSize, 128);
-+		Video.DrawTransRectangleClip(ColorWhite, p.x, p.y, DeselectSize, DeselectSize, 160);
-+		const int inset = 8;
-+		const int far = DeselectSize - 1 - inset;
-+		// Two pixels wide, so the cross stays visible when scaled down.
-+		for (int i = 0; i < 2; ++i) {
-+			Video.DrawLineClip(ColorWhite, PixelPos(p.x + inset + i, p.y + inset),
-+			                   PixelPos(p.x + far + i, p.y + far));
-+			Video.DrawLineClip(ColorWhite, PixelPos(p.x + far + i, p.y + inset),
-+			                   PixelPos(p.x + inset + i, p.y + far));
-+		}
++		DrawDeselectButton(DeselectTopLeft());
 +	}
 +}
 +
