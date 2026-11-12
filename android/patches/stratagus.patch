@@ -26,6 +26,18 @@ index f44cf547b..0a9b57716 100644
  				} else {
  					DebugPrint("Flushing removed unit\n");
  					// This happens, if building with ALT+SHIFT.
+diff --git a/src/include/cursor.h b/src/include/cursor.h
+index c9943b60d..f1299f73f 100644
+--- a/src/include/cursor.h
++++ b/src/include/cursor.h
+@@ -188,6 +188,7 @@ extern CCursor *GameCursor;     /// cursor-type
+ extern PixelPos CursorScreenPos; /// cursor position on screen
+ extern PixelPos CursorStartScreenPos; /// rectangle started on screen
+ extern PixelPos CursorStartMapPos; /// the same in screen map coordinate system
++extern bool CursorFromTouch;     /// last pointer input was a finger, so no cursor is drawn
+ 
+ /*----------------------------------------------------------------------------
+ --  Functions
 diff --git a/src/include/interface.h b/src/include/interface.h
 index 1a210eb57..638600429 100644
 --- a/src/include/interface.h
@@ -390,7 +402,7 @@ index ec8b15d03..c7b5d82d1 100644
  	// FIXME: peon/peasant with gold/wood & co are considered from
  	//   different type... idem for tankers
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..1175c1960 100644
+index f4338a07f..ce1bd2db2 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
 @@ -707,6 +707,57 @@ void DoRightButton(const PixelPos &mapPixelPos)
@@ -489,17 +501,19 @@ index f4338a07f..1175c1960 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -1946,6 +2021,9 @@ void UIHandleButtonDown(unsigned button)
- 	if (CursorState == CursorStates::Rectangle) {
+@@ -1914,6 +1989,11 @@ void UIHandleButtonDown(unsigned button)
+ 		ActionDraw();
  		return;
  	}
-+	if ((MouseButtons & LeftButton) && TouchControlsButtonDown(CursorScreenPos)) {
++	// Before the long press check: holding a control must not show ranges.
++	if (CursorState != CursorStates::Rectangle && (MouseButtons & LeftButton)
++	    && TouchControlsButtonDown(CursorScreenPos)) {
 +		return;
 +	}
- 	// CursorOn should have changed with BigMapMode, so recompute it.
- 	HandleMouseOn(CursorScreenPos);
- 	//  Selecting target. (Move,Attack,Patrol,... commands);
-@@ -1984,6 +2062,9 @@ void UIHandleButtonDown(unsigned button)
+ 
+ 	static bool OldShowSightRange;
+ 	static bool OldShowReactionRange;
+@@ -1984,6 +2064,9 @@ void UIHandleButtonDown(unsigned button)
  */
  void UIHandleButtonUp(unsigned button)
  {
@@ -509,7 +523,7 @@ index f4338a07f..1175c1960 100644
  	//
  	//  Move map.
  	//
-@@ -2159,8 +2240,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -2159,8 +2242,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
@@ -532,10 +546,10 @@ index f4338a07f..1175c1960 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..dd4a27310
+index 000000000..dfa0c53c3
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,548 @@
+@@ -0,0 +1,549 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -940,8 +954,9 @@ index 000000000..dd4a27310
 +	const PixelPos topLeft = GroupTopLeft(group);
 +	DrawButtonBox(file, topLeft);
 +
-+	const CFont *font = CFont::Get("large");
-+	const CLabel label(font ? *font : GetGameFont());
++	// The episode title font, in gold, is about as tall as the X.
++	const CFont *font = CFont::Get("small-title");
++	const CLabel label(font ? *font : GetGameFont(), "yellow", "yellow");
 +	const int shift = pressed ? 1 : 0;
 +	label.DrawCentered(topLeft.x + ButtonWidth / 2 + shift,
 +	                   topLeft.y + (ButtonHeight - label.Height()) / 2 + shift,
@@ -1084,11 +1099,52 @@ index 000000000..dd4a27310
 +}
 +
 +//@}
+diff --git a/src/video/cursor.cpp b/src/video/cursor.cpp
+index e25044acd..616d9687d 100644
+--- a/src/video/cursor.cpp
++++ b/src/video/cursor.cpp
+@@ -77,6 +77,12 @@ PixelPos CursorScreenPos;    /// cursor position on screen
+ PixelPos CursorStartScreenPos;  /// rectangle started on screen
+ PixelPos CursorStartMapPos;/// position of starting point of selection rectangle, in Map pixels.
+ 
++#ifdef __ANDROID__
++bool CursorFromTouch = true; /// phones start without a mouse
++#else
++bool CursorFromTouch = false;
++#endif
++
+ 
+ /*--- DRAW BUILDING  CURSOR ------------------------------------------------*/
+ CUnitType *CursorBuilding;           /// building cursor
+@@ -342,6 +348,15 @@ void DrawCursor()
+ 		return;
+ 	}
+ 
++	// A finger needs no pointer. It comes back as soon as a real mouse moves.
++	if (CursorFromTouch) {
++		if (Preference.HardwareCursor) {
++			SDL_SetCursor(Video.blankCursor.get());
++			ActuallyVisibleGameCursor = nullptr;
++		}
++		return;
++	}
++
+ 	//  Last, Normal cursor.
+ 	if (!Preference.HardwareCursor) {
+ 		const PixelPos pos = CursorScreenPos - GameCursor->HotPos;
 diff --git a/src/video/sdl.cpp b/src/video/sdl.cpp
-index 18af13249..04a5abd4c 100644
+index 18af13249..ab5141489 100644
 --- a/src/video/sdl.cpp
 +++ b/src/video/sdl.cpp
-@@ -340,7 +340,14 @@ void InitVideoSdl()
+@@ -36,6 +36,7 @@
+ 
+ #include "stratagus.h"
+ 
++#include "cursor.h"
+ #include "game.h"
+ #include "network.h"
+ #include "online_service.h"
+@@ -340,7 +341,14 @@ void InitVideoSdl()
  		}
  
  		SDL_CUSTOM_KEY_UP = SDL_RegisterEvents(1);
@@ -1103,7 +1159,7 @@ index 18af13249..04a5abd4c 100644
  
  		// Clean up on exit
  		atexit(CleanUpVideoSdl);
-@@ -428,7 +435,8 @@ void InitVideoSdl()
+@@ -428,7 +436,8 @@ void InitVideoSdl()
  		if (strlen(rendererInfo.name) == 0) {
  			dummyRenderer = true;
  		}
@@ -1113,6 +1169,22 @@ index 18af13249..04a5abd4c 100644
  			LoadShaderExtensions();
  		}
  	}
+@@ -573,6 +582,7 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+ 
+ 	switch (event.type) {
+ 		case SDL_MOUSEBUTTONDOWN:
++			CursorFromTouch = event.button.which == SDL_TOUCH_MOUSEID;
+ 			event.button.y = static_cast<int>(std::floor(event.button.y / Video.VerticalPixelSize + 0.5));
+ 			InputMouseButtonPress(callbacks, SDL_GetTicks(), event.button.button);
+ 			break;
+@@ -583,6 +593,7 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+ 			break;
+ 
+ 		case SDL_MOUSEMOTION:
++			CursorFromTouch = event.motion.which == SDL_TOUCH_MOUSEID;
+ 			event.motion.y = static_cast<int>(std::floor(event.button.y / Video.VerticalPixelSize + 0.5));
+ 			InputMouseMove(callbacks, SDL_GetTicks(), event.motion.x, event.motion.y);
+ 			break;
 diff --git a/src/video/shaders.cpp b/src/video/shaders.cpp
 index 61b52a3f2..0fc073414 100644
 --- a/src/video/shaders.cpp
