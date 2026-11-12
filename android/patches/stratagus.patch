@@ -546,10 +546,10 @@ index f4338a07f..ce1bd2db2 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..dfa0c53c3
+index 000000000..d05e562e0
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,549 @@
+@@ -0,0 +1,550 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -927,17 +927,18 @@ index 000000000..dfa0c53c3
 +{
 +	DrawButtonBox(BlueButtonFile, topLeft);
 +
-+	const int size = 32;
++	// About as tall as the group buttons' numbers.
++	const int size = 19;
 +	const PixelPos a(topLeft.x + (ButtonWidth - size) / 2, topLeft.y + (ButtonHeight - size) / 2);
 +	const PixelPos b = a + PixelDiff(size, size);
 +	const Uint32 shadow = Rgb(40, 24, 0);
 +	const Uint32 gold = Rgb(252, 204, 52);
 +	const Uint32 shine = Rgb(255, 240, 150);
-+	for (int i = -2; i <= 2; ++i) {
-+		Video.DrawLineClip(shadow, PixelPos(a.x + i + 2, a.y + 2), PixelPos(b.x + i + 2, b.y + 2));
-+		Video.DrawLineClip(shadow, PixelPos(b.x + i + 2, a.y + 2), PixelPos(a.x + i + 2, b.y + 2));
++	for (int i = -1; i <= 1; ++i) {
++		Video.DrawLineClip(shadow, PixelPos(a.x + i + 1, a.y + 1), PixelPos(b.x + i + 1, b.y + 1));
++		Video.DrawLineClip(shadow, PixelPos(b.x + i + 1, a.y + 1), PixelPos(a.x + i + 1, b.y + 1));
 +	}
-+	for (int i = -2; i <= 2; ++i) {
++	for (int i = -1; i <= 1; ++i) {
 +		const Uint32 color = i < 0 ? shine : gold;
 +		Video.DrawLineClip(color, PixelPos(a.x + i, a.y), PixelPos(b.x + i, b.y));
 +		Video.DrawLineClip(color, PixelPos(b.x + i, a.y), PixelPos(a.x + i, b.y));
