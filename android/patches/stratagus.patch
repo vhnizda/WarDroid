@@ -1,3 +1,15 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9ba608154..6bd8a4d9a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -305,6 +305,7 @@ set(ui_SRCS
+ 	src/ui/popup.cpp
+ 	src/ui/script_ui.cpp
+ 	src/ui/statusline.cpp
++	src/ui/touch_controls.cpp
+ 	src/ui/ui.cpp
+ 	src/ui/uitimer.cpp
+ 	src/ui/widgets.cpp
 diff --git a/src/action/actions.cpp b/src/action/actions.cpp
 index f44cf547b..0a9b57716 100644
 --- a/src/action/actions.cpp
@@ -14,6 +26,27 @@ index f44cf547b..0a9b57716 100644
  				} else {
  					DebugPrint("Flushing removed unit\n");
  					// This happens, if building with ALT+SHIFT.
+diff --git a/src/include/interface.h b/src/include/interface.h
+index 1a210eb57..638600429 100644
+--- a/src/include/interface.h
++++ b/src/include/interface.h
+@@ -396,6 +396,16 @@ extern void UpdateTimer();
+ extern void UpdateStatusLineForButton(const ButtonAction &button);
+ /// Draw the Pie Menu
+ extern void DrawPieMenu();
++/// Draw the on-screen joystick and deselect button for touch screens
++extern void DrawTouchControls();
++/// Handle a press on the touch controls, true if it was used
++extern bool TouchControlsButtonDown(const PixelPos &screenPos);
++/// Follow the finger on the joystick, true if it was used
++extern bool TouchControlsMouseMove(const PixelPos &screenPos);
++/// Let go of the joystick, true if it was held
++extern bool TouchControlsButtonUp();
++/// Scroll the map while the joystick is pushed
++extern void TouchControlsScroll();
+ /// Draw the button popup
+ extern void DrawPopup(const ButtonAction &button, const CUIButton &uibutton, int x = 0, int y = 0);
+ 
 diff --git a/src/include/net_lowlevel.h b/src/include/net_lowlevel.h
 index 4df2bce7f..0386fc061 100644
 --- a/src/include/net_lowlevel.h
@@ -303,8 +336,28 @@ index 48ca4fb27..c460f1f11 100644
  }
  
  
+diff --git a/src/stratagus/mainloop.cpp b/src/stratagus/mainloop.cpp
+index 1bcd3803b..7ffa33b86 100644
+--- a/src/stratagus/mainloop.cpp
++++ b/src/stratagus/mainloop.cpp
+@@ -221,6 +221,7 @@ void UpdateDisplay()
+ 		}
+ 
+ 		DrawTimer();
++		DrawTouchControls();
+ 	}
+ 
+ 	DrawPieMenu(); // draw pie menu only if needed
+@@ -354,6 +355,7 @@ static void DisplayLoop()
+ 	// Map scrolling
+ 	//
+ 	DoScrollArea(MouseScrollState | KeyScrollState, (KeyModifiers & ModifierControl) != 0, MouseScrollState == 0 && KeyScrollState > 0);
++	TouchControlsScroll();
+ 
+ 	ColorCycle();
+ 
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..ac36b0bec 100644
+index f4338a07f..b6cf5d6e3 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
 @@ -707,6 +707,50 @@ void DoRightButton(const PixelPos &mapPixelPos)
@@ -358,7 +411,17 @@ index f4338a07f..ac36b0bec 100644
  /**
  **  Check if the mouse is on a button
  **
-@@ -1754,6 +1798,27 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+@@ -1000,6 +1044,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
+ 		ActionDraw();
+ 		return;
+ 	}
++	if (TouchControlsMouseMove(cursorPos)) {
++		return;
++	}
+ 
+ 	OldCursorOn = CursorOn;
+ 	//  Selecting units.
+@@ -1754,6 +1801,27 @@ static void UIHandleButtonDown_OnMap(unsigned button)
  			DoRightButton(mapPixelPos);
  		}
  	} else if (MouseButtons & LeftButton) { // enter select mode
@@ -386,7 +449,27 @@ index f4338a07f..ac36b0bec 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -2159,8 +2224,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -1946,6 +2014,9 @@ void UIHandleButtonDown(unsigned button)
+ 	if (CursorState == CursorStates::Rectangle) {
+ 		return;
+ 	}
++	if ((MouseButtons & LeftButton) && TouchControlsButtonDown(CursorScreenPos)) {
++		return;
++	}
+ 	// CursorOn should have changed with BigMapMode, so recompute it.
+ 	HandleMouseOn(CursorScreenPos);
+ 	//  Selecting target. (Move,Attack,Patrol,... commands);
+@@ -1984,6 +2055,9 @@ void UIHandleButtonDown(unsigned button)
+ */
+ void UIHandleButtonUp(unsigned button)
+ {
++	if ((1 << button) == LeftButton && TouchControlsButtonUp()) {
++		return;
++	}
+ 	//
+ 	//  Move map.
+ 	//
+@@ -2159,8 +2233,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
@@ -407,6 +490,257 @@ index f4338a07f..ac36b0bec 100644
  			}
  		}
  
+diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
+new file mode 100644
+index 000000000..838fcedf2
+--- /dev/null
++++ b/src/ui/touch_controls.cpp
+@@ -0,0 +1,245 @@
++//       _________ __                 __
++//      /   _____//  |_____________ _/  |______     ____  __ __  ______
++//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
++//      /        \|  |  |  | \// __ \|  |  / __ \_/ /_/  >  |  /\___ |
++//     /_______  /|__|  |__|  (____  /__| (____  /\___  /|____//____  >
++//             \/                  \/          \//_____/            \/
++//  ______________________                           ______________________
++//                        T H E   W A R   B E G I N S
++//         Stratagus - A free fantasy real time strategy game engine
++//
++/**@name touch_controls.cpp - On-screen controls for touch screens. */
++//
++//      This program is free software; you can redistribute it and/or modify
++//      it under the terms of the GNU General Public License as published by
++//      the Free Software Foundation; only version 2 of the License.
++//
++//      This program is distributed in the hope that it will be useful,
++//      but WITHOUT ANY WARRANTY; without even the implied warranty of
++//      MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++//      GNU General Public License for more details.
++//
++//      You should have received a copy of the GNU General Public License
++//      along with this program; if not, write to the Free Software
++//      Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
++//      02111-1307, USA.
++//
++
++//@{
++
++/*----------------------------------------------------------------------------
++--  Includes
++----------------------------------------------------------------------------*/
++
++#include "stratagus.h"
++
++#include "interface.h"
++#include "network.h"
++#include "ui.h"
++#include "unit.h"
++#include "video.h"
++
++#include <cmath>
++
++/*----------------------------------------------------------------------------
++--  Variables
++----------------------------------------------------------------------------*/
++
++#ifdef __ANDROID__
++static constexpr bool TouchControlsEnabled = true;
++#else
++static constexpr bool TouchControlsEnabled = false;
++#endif
++
++/// Joystick base radius and knob radius, in screen pixels.
++static constexpr int JoystickRadius = 40;
++static constexpr int KnobRadius = 16;
++/// Knob travel below which the joystick doesn't scroll.
++static constexpr int JoystickDeadZone = 8;
++/// Map scrolling speed while the joystick is pushed, in pixels per second.
++static constexpr double JoystickScrollSpeed = 480;
++/// Side of the deselect button, in screen pixels.
++static constexpr int DeselectSize = 32;
++/// Gap between the controls and the edge of the map area.
++static constexpr int ControlMargin = 8;
++
++static bool JoystickHeld = false;
++static PixelDiff KnobOffset(0, 0);
++static Uint32 LastScrollTicks = 0;
++static double ScrollRemainderX = 0;
++static double ScrollRemainderY = 0;
++
++/*----------------------------------------------------------------------------
++--  Functions
++----------------------------------------------------------------------------*/
++
++static PixelPos JoystickCenter()
++{
++	return PixelPos(UI.MapArea.X + ControlMargin + JoystickRadius,
++	                UI.MapArea.EndY - ControlMargin - JoystickRadius);
++}
++
++static PixelPos DeselectTopLeft()
++{
++	return PixelPos(UI.MapArea.EndX - ControlMargin - DeselectSize,
++	                UI.MapArea.EndY - ControlMargin - DeselectSize);
++}
++
++static bool ControlsShown()
++{
++	return TouchControlsEnabled && GameRunning && !GamePaused;
++}
++
++static bool DeselectShown()
++{
++	return ControlsShown() && !Selected.empty();
++}
++
++static bool IsOnJoystick(const PixelPos &screenPos)
++{
++	const PixelDiff d = screenPos - JoystickCenter();
++	return d.x * d.x + d.y * d.y <= JoystickRadius * JoystickRadius;
++}
++
++static bool IsOnDeselect(const PixelPos &screenPos)
++{
++	const PixelPos topLeft = DeselectTopLeft();
++	return screenPos.x >= topLeft.x && screenPos.x < topLeft.x + DeselectSize
++	       && screenPos.y >= topLeft.y && screenPos.y < topLeft.y + DeselectSize;
++}
++
++/// Puts the knob under the finger, kept within the base.
++static void MoveKnob(const PixelPos &screenPos)
++{
++	PixelDiff d = screenPos - JoystickCenter();
++	const double length = std::sqrt(double(d.x * d.x + d.y * d.y));
++	if (length > JoystickRadius) {
++		d.x = int(d.x * JoystickRadius / length);
++		d.y = int(d.y * JoystickRadius / length);
++	}
++	KnobOffset = d;
++}
++
++/**
++**  Draw the joystick and, when units are selected, the deselect button.
++*/
++void DrawTouchControls()
++{
++	if (!ControlsShown()) {
++		return;
++	}
++	const PixelPos center = JoystickCenter();
++	Video.FillTransCircleClip(ColorBlack, center.x, center.y, JoystickRadius, 96);
++	Video.DrawTransCircleClip(ColorWhite, center.x, center.y, JoystickRadius, 160);
++	Video.FillTransCircleClip(ColorWhite, center.x + KnobOffset.x, center.y + KnobOffset.y,
++	                          KnobRadius, JoystickHeld ? 200 : 128);
++
++	if (DeselectShown()) {
++		const PixelPos p = DeselectTopLeft();
++		Video.FillTransRectangleClip(ColorBlack, p.x, p.y, DeselectSize, DeselectSize, 128);
++		Video.DrawTransRectangleClip(ColorWhite, p.x, p.y, DeselectSize, DeselectSize, 160);
++		const int inset = 8;
++		const int far = DeselectSize - 1 - inset;
++		// Two pixels wide, so the cross stays visible when scaled down.
++		for (int i = 0; i < 2; ++i) {
++			Video.DrawLineClip(ColorWhite, PixelPos(p.x + inset + i, p.y + inset),
++			                   PixelPos(p.x + far + i, p.y + far));
++			Video.DrawLineClip(ColorWhite, PixelPos(p.x + far + i, p.y + inset),
++			                   PixelPos(p.x + inset + i, p.y + far));
++		}
++	}
++}
++
++/**
++**  Handle a press on the controls.
++**
++**  @return  True if the press was on a control and must not reach the map.
++*/
++bool TouchControlsButtonDown(const PixelPos &screenPos)
++{
++	if (!ControlsShown()) {
++		return false;
++	}
++	// Holding the joystick still sends a long press, which mustn't start
++	// a selection box.
++	if (JoystickHeld) {
++		return true;
++	}
++	if (DeselectShown() && IsOnDeselect(screenPos)) {
++		UnSelectAll();
++		NetworkSendSelection(nullptr, 0);
++		SelectionChanged();
++		return true;
++	}
++	if (IsOnJoystick(screenPos)) {
++		JoystickHeld = true;
++		LastScrollTicks = SDL_GetTicks();
++		ScrollRemainderX = ScrollRemainderY = 0;
++		MoveKnob(screenPos);
++		return true;
++	}
++	return false;
++}
++
++/**
++**  Follow the finger while the joystick is held.
++**
++**  @return  True if the joystick is held and the move must not reach the map.
++*/
++bool TouchControlsMouseMove(const PixelPos &screenPos)
++{
++	if (!JoystickHeld) {
++		return false;
++	}
++	MoveKnob(screenPos);
++	return true;
++}
++
++/**
++**  Let go of the joystick.
++**
++**  @return  True if the joystick was held and the release must not reach the map.
++*/
++bool TouchControlsButtonUp()
++{
++	if (!JoystickHeld) {
++		return false;
++	}
++	JoystickHeld = false;
++	KnobOffset = PixelDiff(0, 0);
++	return true;
++}
++
++/**
++**  Scroll the map at an even speed in the direction the joystick points.
++**  Called once per displayed frame.
++*/
++void TouchControlsScroll()
++{
++	if (!JoystickHeld) {
++		return;
++	}
++	if (!ControlsShown()) {
++		TouchControlsButtonUp();
++		return;
++	}
++	const Uint32 now = SDL_GetTicks();
++	const double seconds = (now - LastScrollTicks) / 1000.0;
++	LastScrollTicks = now;
++
++	const double length = std::sqrt(double(KnobOffset.x * KnobOffset.x + KnobOffset.y * KnobOffset.y));
++	if (length < JoystickDeadZone) {
++		return;
++	}
++	ScrollRemainderX += KnobOffset.x / length * JoystickScrollSpeed * seconds;
++	ScrollRemainderY += KnobOffset.y / length * JoystickScrollSpeed * seconds;
++	const PixelDiff step(static_cast<int>(ScrollRemainderX), static_cast<int>(ScrollRemainderY));
++	ScrollRemainderX -= step.x;
++	ScrollRemainderY -= step.y;
++	if (step.x || step.y) {
++		CViewport *vp = UI.SelectedViewport;
++		vp->Set(vp->MapPos, vp->Offset + step);
++	}
++}
++
++//@}
 diff --git a/src/video/sdl.cpp b/src/video/sdl.cpp
 index 18af13249..04a5abd4c 100644
 --- a/src/video/sdl.cpp
