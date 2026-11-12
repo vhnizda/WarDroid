@@ -27,14 +27,16 @@ index f44cf547b..0a9b57716 100644
  					DebugPrint("Flushing removed unit\n");
  					// This happens, if building with ALT+SHIFT.
 diff --git a/src/include/cursor.h b/src/include/cursor.h
-index c9943b60d..f1299f73f 100644
+index c9943b60d..116d6550e 100644
 --- a/src/include/cursor.h
 +++ b/src/include/cursor.h
-@@ -188,6 +188,7 @@ extern CCursor *GameCursor;     /// cursor-type
+@@ -188,6 +188,9 @@ extern CCursor *GameCursor;     /// cursor-type
  extern PixelPos CursorScreenPos; /// cursor position on screen
  extern PixelPos CursorStartScreenPos; /// rectangle started on screen
  extern PixelPos CursorStartMapPos; /// the same in screen map coordinate system
 +extern bool CursorFromTouch;     /// last pointer input was a finger, so no cursor is drawn
++/// Pointer moved far enough since the press to make a selection box
++extern bool IsSelectionDrag();
  
  /*----------------------------------------------------------------------------
  --  Functions
@@ -592,10 +594,10 @@ index ec8b15d03..c7b5d82d1 100644
  	// FIXME: peon/peasant with gold/wood & co are considered from
  	//   different type... idem for tankers
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..33fb54056 100644
+index f4338a07f..055afd4d6 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
-@@ -707,6 +707,57 @@ void DoRightButton(const PixelPos &mapPixelPos)
+@@ -707,6 +707,74 @@ void DoRightButton(const PixelPos &mapPixelPos)
  	ShowOrdersCount = GameCycle + Preference.ShowOrders * CYCLES_PER_SECOND;
  }
  
@@ -650,10 +652,27 @@ index f4338a07f..33fb54056 100644
 +	return useful;
 +}
 +
++/**
++**  Order the selected units as a right click would, for a smart click.
++**  Every unit goes for the clicked tile, without the formation offsets that
++**  a right click on open ground uses.
++*/
++static void DoSmartClick(CUnit *dest, const Vec2i &pos, const PixelPos &mapPixelPos)
++{
++	if (dest == nullptr && !ClickMissile.empty()) {
++		MakeLocalMissile(MissileTypeByIdent(ClickMissile), mapPixelPos, mapPixelPos);
++	}
++	int acknowledged = 0;
++	for (CUnit *unit : Selected) {
++		DoRightButton_ForSelectedUnit(*unit, dest, pos, acknowledged);
++	}
++	ShowOrdersCount = GameCycle + Preference.ShowOrders * CYCLES_PER_SECOND;
++}
++
  /**
  **  Check if the mouse is on a button
  **
-@@ -1000,6 +1051,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
+@@ -1000,6 +1068,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
  		ActionDraw();
  		return;
  	}
@@ -663,35 +682,16 @@ index f4338a07f..33fb54056 100644
  
  	OldCursorOn = CursorOn;
  	//  Selecting units.
-@@ -1754,6 +1808,27 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+@@ -1754,6 +1825,8 @@ static void UIHandleButtonDown_OnMap(unsigned button)
  			DoRightButton(mapPixelPos);
  		}
  	} else if (MouseButtons & LeftButton) { // enter select mode
-+		if (UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {
-+			CUnit *dest = UnitUnderCursor;
-+			if (dest != nullptr && dest->Type->BoolFlag[DECORATION_INDEX].value) {
-+				dest = nullptr;
-+			}
-+			const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
-+			if (IsSmartClick(dest, tilePos)) {
-+				// Every unit goes for the clicked tile, without the
-+				// formation offsets that a right click on open ground uses.
-+				if (dest == nullptr && !ClickMissile.empty()) {
-+					const PixelPos mapPixelPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
-+					MakeLocalMissile(MissileTypeByIdent(ClickMissile), mapPixelPos, mapPixelPos);
-+				}
-+				int acknowledged = 0;
-+				for (CUnit *unit : Selected) {
-+					DoRightButton_ForSelectedUnit(*unit, dest, tilePos, acknowledged);
-+				}
-+				ShowOrdersCount = GameCycle + Preference.ShowOrders * CYCLES_PER_SECOND;
-+				return;
-+			}
-+		}
++		// A click may still turn out to be a smart click, decided on release
++		// so that a selection box can start anywhere.
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -1914,6 +1989,15 @@ void UIHandleButtonDown(unsigned button)
+@@ -1914,6 +1987,15 @@ void UIHandleButtonDown(unsigned button)
  		ActionDraw();
  		return;
  	}
@@ -707,7 +707,7 @@ index f4338a07f..33fb54056 100644
  
  	static bool OldShowSightRange;
  	static bool OldShowReactionRange;
-@@ -1984,6 +2068,9 @@ void UIHandleButtonDown(unsigned button)
+@@ -1984,6 +2066,9 @@ void UIHandleButtonDown(unsigned button)
  */
  void UIHandleButtonUp(unsigned button)
  {
@@ -717,7 +717,35 @@ index f4338a07f..33fb54056 100644
  	//
  	//  Move map.
  	//
-@@ -2159,8 +2246,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -2084,10 +2169,9 @@ void UIHandleButtonUp(unsigned button)
+ 	if (CursorState == CursorStates::Rectangle && !(MouseButtons & LeftButton)) { // leave select mode
+ 		int num = 0;
+ 		//
+-		//  Little threshold
++		//  Little threshold, larger for a finger
+ 		//
+-		if (CursorStartScreenPos.x < CursorScreenPos.x - 1 || CursorScreenPos.x + 1 < CursorStartScreenPos.x
+-			|| CursorStartScreenPos.y < CursorScreenPos.y - 1 || CursorScreenPos.y + 1 < CursorStartScreenPos.y) {
++		if (IsSelectionDrag()) {
+ 			PixelPos pos0 = CursorStartMapPos;
+ 			const PixelPos cursorMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
+ 			PixelPos pos1 = cursorMapPos;
+@@ -2128,7 +2212,13 @@ void UIHandleButtonUp(unsigned button)
+ 
+ 				unit = UnitOnScreen(cursorMapPos.x, cursorMapPos.y);
+ 			}
+-			if (unit) {
++			CUnit *smartDest = UnitUnderCursor;
++			if (smartDest != nullptr && smartDest->Type->BoolFlag[DECORATION_INDEX].value) {
++				smartDest = nullptr;
++			}
++			if (IsSmartClick(smartDest, cursorTilePos)) {
++				DoSmartClick(smartDest, cursorTilePos, UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos));
++			} else if (unit) {
+ 				// FIXME: Not nice coded, button number hardcoded!
+ 				if ((KeyModifiers & ModifierControl)
+ 					|| (button & (1 << MouseDoubleShift))) {
+@@ -2159,8 +2249,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
@@ -1494,10 +1522,10 @@ index 000000000..e07696868
 +
 +//@}
 diff --git a/src/video/cursor.cpp b/src/video/cursor.cpp
-index e25044acd..616d9687d 100644
+index e25044acd..d5d6c0a16 100644
 --- a/src/video/cursor.cpp
 +++ b/src/video/cursor.cpp
-@@ -77,6 +77,12 @@ PixelPos CursorScreenPos;    /// cursor position on screen
+@@ -77,6 +77,24 @@ PixelPos CursorScreenPos;    /// cursor position on screen
  PixelPos CursorStartScreenPos;  /// rectangle started on screen
  PixelPos CursorStartMapPos;/// position of starting point of selection rectangle, in Map pixels.
  
@@ -1507,10 +1535,31 @@ index e25044acd..616d9687d 100644
 +bool CursorFromTouch = false;
 +#endif
 +
++/**
++**  Whether the pointer has moved far enough from where the button went
++**  down for the press to be a selection box rather than a click. A finger
++**  wobbles a lot more than a mouse while tapping.
++*/
++bool IsSelectionDrag()
++{
++	const int threshold = CursorFromTouch ? 12 : 1;
++	return std::abs(CursorScreenPos.x - CursorStartScreenPos.x) > threshold
++	       || std::abs(CursorScreenPos.y - CursorStartScreenPos.y) > threshold;
++}
++
  
  /*--- DRAW BUILDING  CURSOR ------------------------------------------------*/
  CUnitType *CursorBuilding;           /// building cursor
-@@ -342,6 +348,15 @@ void DrawCursor()
+@@ -323,7 +341,7 @@ void DrawCursor()
+ 	}
+ 
+ 	// Selecting rectangle
+-	if (CursorState == CursorStates::Rectangle && CursorStartScreenPos != CursorScreenPos) {
++	if (CursorState == CursorStates::Rectangle && IsSelectionDrag()) {
+ 		const PixelPos cursorStartScreenPos = UI.MouseViewport->MapToScreenPixelPos(CursorStartMapPos);
+ 
+ 		DrawVisibleRectangleCursor(cursorStartScreenPos, CursorScreenPos);
+@@ -342,6 +360,15 @@ void DrawCursor()
  		return;
  	}
  
