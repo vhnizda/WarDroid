@@ -303,6 +303,89 @@ index 48ca4fb27..c460f1f11 100644
  }
  
  
+diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
+index f4338a07f..92e5b2439 100644
+--- a/src/ui/mouse.cpp
++++ b/src/ui/mouse.cpp
+@@ -707,6 +707,50 @@ void DoRightButton(const PixelPos &mapPixelPos)
+ 	ShowOrdersCount = GameCycle + Preference.ShowOrders * CYCLES_PER_SECOND;
+ }
+ 
++/**
++**  Check if a left click should order the selected workers instead of
++**  selecting what is under the cursor: harvest a mine or trees, or repair
++**  a damaged building. Touch screens have no right button to do this.
++**
++**  @param dest  Unit under the cursor, or null.
++**  @param pos   Map tile clicked.
++*/
++static bool IsWorkerSmartClick(const CUnit *dest, const Vec2i &pos)
++{
++	if (Selected.empty() || KeyModifiers || GameObserve || GamePaused || GameEstablishing) {
++		return false;
++	}
++	bool useful = false;
++	for (const CUnit *unit : Selected) {
++		const CUnitType &type = *unit->Type;
++		if (unit->Player != ThisPlayer || type.MouseAction != EMouseAction::Harvest) {
++			return false;
++		}
++		if (dest != nullptr) {
++			if (type.RepairRange && dest->Type->RepairHP
++				&& dest->Variable[HP_INDEX].Value < dest->Variable[HP_INDEX].Max
++				&& (dest->Player == unit->Player || unit->IsAllied(*dest))) {
++				useful = true;
++			}
++			const int res = dest->Type->GivesResource;
++			if (type.BoolFlag[HARVESTER_INDEX].value && res && type.ResInfo[res]
++				&& dest->Type->BoolFlag[CANHARVEST_INDEX].value
++				&& (dest->Player == unit->Player || dest->Player->Index == PlayerNumNeutral)) {
++				useful = true;
++			}
++		} else if (type.BoolFlag[HARVESTER_INDEX].value
++		           && Map.Field(pos)->playerInfo.IsExplored(*unit->Player)) {
++			for (int res = 0; res < MaxCosts; ++res) {
++				if (type.ResInfo[res] && type.ResInfo[res]->TerrainHarvester
++					&& Map.Field(pos)->IsTerrainResourceOnMap(res)) {
++					useful = true;
++				}
++			}
++		}
++	}
++	return useful;
++}
++
+ /**
+ **  Check if the mouse is on a button
+ **
+@@ -1754,6 +1798,27 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+ 			DoRightButton(mapPixelPos);
+ 		}
+ 	} else if (MouseButtons & LeftButton) { // enter select mode
++		if (UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {
++			CUnit *dest = UnitUnderCursor;
++			if (dest != nullptr && dest->Type->BoolFlag[DECORATION_INDEX].value) {
++				dest = nullptr;
++			}
++			const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
++			if (IsWorkerSmartClick(dest, tilePos)) {
++				// Every worker goes for the clicked tile, without the
++				// formation offsets that a right click on open ground uses.
++				if (dest == nullptr && !ClickMissile.empty()) {
++					const PixelPos mapPixelPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
++					MakeLocalMissile(MissileTypeByIdent(ClickMissile), mapPixelPos, mapPixelPos);
++				}
++				int acknowledged = 0;
++				for (CUnit *unit : Selected) {
++					DoRightButton_ForSelectedUnit(*unit, dest, tilePos, acknowledged);
++				}
++				ShowOrdersCount = GameCycle + Preference.ShowOrders * CYCLES_PER_SECOND;
++				return;
++			}
++		}
+ 		CursorStartScreenPos = CursorScreenPos;
+ 		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
+ 		GameCursor = UI.Cross.Cursor;
 diff --git a/src/video/sdl.cpp b/src/video/sdl.cpp
 index 18af13249..04a5abd4c 100644
 --- a/src/video/sdl.cpp
