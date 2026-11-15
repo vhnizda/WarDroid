@@ -596,7 +596,7 @@ index ec8b15d03..c7b5d82d1 100644
  	// FIXME: peon/peasant with gold/wood & co are considered from
  	//   different type... idem for tankers
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..89fab983b 100644
+index f4338a07f..4e22011ff 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
 @@ -707,6 +707,133 @@ void DoRightButton(const PixelPos &mapPixelPos)
@@ -743,7 +743,81 @@ index f4338a07f..89fab983b 100644
  
  	OldCursorOn = CursorOn;
  	//  Selecting units.
-@@ -1754,6 +1884,8 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+@@ -1686,6 +1816,37 @@ static void UISelectStateButtonDown(unsigned)
+ }
+ 
+ 
++/// A finger is down on the map in building mode; the building is placed
++/// where it lifts.
++static bool TouchBuildPending = false;
++
++/**
++**  Order the selected units to build the building being placed, at the
++**  tile under the cursor, if it can go there.
++*/
++static void PlaceCursorBuilding()
++{
++	const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
++	bool explored = CanBuildOnArea(*Selected[0], tilePos);
++
++	// 0 Test build, don't really build
++	if (CanBuildUnitType(Selected[0], *CursorBuilding, tilePos, 0) && (explored || ReplayRevealMap)) {
++		const EFlushMode flush =
++			!(KeyModifiers & ModifierShift) ? EFlushMode::On : EFlushMode::Off;
++		PlayGameSound(GameSounds.PlacementSuccess[ThisPlayer->Race].Sound.get(), MaxSampleVolume);
++		PlayUnitSound(*Selected[0], EUnitVoice::Build);
++		for (CUnit *unit : Selected) {
++			SendCommandBuildBuilding(*unit, tilePos, *CursorBuilding, flush);
++		}
++		if (!(KeyModifiers & (ModifierAlt | ModifierShift))) {
++			CancelBuildingMode();
++		}
++	} else {
++		PlayGameSound(GameSounds.PlacementError[ThisPlayer->Race].Sound.get(),
++		              MaxSampleVolume);
++	}
++}
++
+ static void UIHandleButtonDown_OnMap(unsigned button)
+ {
+ 	Assert(UI.MouseViewport);
+@@ -1699,27 +1860,16 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+ 	if (CursorBuilding) {
+ 		// Possible Selected[0] was removed from map
+ 		// need to make sure there is a unit to build
+-		if (Selected[0] && (MouseButtons & LeftButton)
++		if (!Selected.empty() && Selected[0] && (MouseButtons & LeftButton)
+ 			&& UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {// enter select mode
+-			const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
+-			bool explored = CanBuildOnArea(*Selected[0], tilePos);
+-
+-			// 0 Test build, don't really build
+-			if (CanBuildUnitType(Selected[0], *CursorBuilding, tilePos, 0) && (explored || ReplayRevealMap)) {
+-				const EFlushMode flush =
+-					!(KeyModifiers & ModifierShift) ? EFlushMode::On : EFlushMode::Off;
+-				PlayGameSound(GameSounds.PlacementSuccess[ThisPlayer->Race].Sound.get(), MaxSampleVolume);
+-				PlayUnitSound(*Selected[0], EUnitVoice::Build);
+-				for (CUnit *unit : Selected) {
+-					SendCommandBuildBuilding(*unit, tilePos, *CursorBuilding, flush);
+-				}
+-				if (!(KeyModifiers & (ModifierAlt | ModifierShift))) {
+-					CancelBuildingMode();
+-				}
+-			} else {
+-				PlayGameSound(GameSounds.PlacementError[ThisPlayer->Race].Sound.get(),
+-				              MaxSampleVolume);
++			if (CursorFromTouch) {
++				// A finger can't hover to show where the building goes, so
++				// it is shown under the finger while held and placed on
++				// release.
++				TouchBuildPending = true;
++				return;
+ 			}
++			PlaceCursorBuilding();
+ 		} else {
+ 			CancelBuildingMode();
+ 		}
+@@ -1754,6 +1904,8 @@ static void UIHandleButtonDown_OnMap(unsigned button)
  			DoRightButton(mapPixelPos);
  		}
  	} else if (MouseButtons & LeftButton) { // enter select mode
@@ -752,7 +826,7 @@ index f4338a07f..89fab983b 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -1914,6 +2046,15 @@ void UIHandleButtonDown(unsigned button)
+@@ -1914,6 +2066,15 @@ void UIHandleButtonDown(unsigned button)
  		ActionDraw();
  		return;
  	}
@@ -768,17 +842,38 @@ index f4338a07f..89fab983b 100644
  
  	static bool OldShowSightRange;
  	static bool OldShowReactionRange;
-@@ -1984,6 +2125,9 @@ void UIHandleButtonDown(unsigned button)
+@@ -1924,7 +2085,8 @@ void UIHandleButtonDown(unsigned button)
+ 	// Reset the ShowNameDelay counters
+ 	ShowNameDelay = ShowNameTime = GameCycle;
+ 
+-	if (longLeftButton) {
++	// A finger held to place a building is not asking to see ranges.
++	if (longLeftButton && !TouchBuildPending) {
+ 		if (!OldValid) {
+ 			OldShowSightRange = Preference.ShowSightRange;
+ 			OldShowAttackRange = Preference.ShowAttackRange;
+@@ -1984,6 +2146,20 @@ void UIHandleButtonDown(unsigned button)
  */
  void UIHandleButtonUp(unsigned button)
  {
 +	if ((1 << button) == LeftButton && TouchControlsButtonUp()) {
 +		return;
 +	}
++	// The finger placing a building lifted: build where it is now, unless it
++	// slid off the map or a pinch took over.
++	if ((1 << button) == LeftButton && TouchBuildPending) {
++		TouchBuildPending = false;
++		HandleMouseOn(CursorScreenPos);
++		if (CursorBuilding && !TouchControlsPinching() && !Selected.empty() && Selected[0]
++		    && CursorOn == ECursorOn::Map && UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {
++			PlaceCursorBuilding();
++		}
++		return;
++	}
  	//
  	//  Move map.
  	//
-@@ -2084,10 +2228,9 @@ void UIHandleButtonUp(unsigned button)
+@@ -2084,10 +2260,9 @@ void UIHandleButtonUp(unsigned button)
  	if (CursorState == CursorStates::Rectangle && !(MouseButtons & LeftButton)) { // leave select mode
  		int num = 0;
  		//
@@ -791,7 +886,7 @@ index f4338a07f..89fab983b 100644
  			PixelPos pos0 = CursorStartMapPos;
  			const PixelPos cursorMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  			PixelPos pos1 = cursorMapPos;
-@@ -2128,7 +2271,13 @@ void UIHandleButtonUp(unsigned button)
+@@ -2128,7 +2303,13 @@ void UIHandleButtonUp(unsigned button)
  
  				unit = UnitOnScreen(cursorMapPos.x, cursorMapPos.y);
  			}
@@ -806,7 +901,7 @@ index f4338a07f..89fab983b 100644
  				// FIXME: Not nice coded, button number hardcoded!
  				if ((KeyModifiers & ModifierControl)
  					|| (button & (1 << MouseDoubleShift))) {
-@@ -2159,8 +2308,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -2159,8 +2340,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
