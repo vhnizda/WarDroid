@@ -1,8 +1,10 @@
-# WarcraftAI
+# WarDroid
 
-Android port of the open source Stratagus engine and Wargus game layer. Both are GPL-2.0.
+WarDroid plays Warcraft II on Android phones and tablets, with touch controls built for the small screen: smart taps, a scroll joystick, pinch zoom, group buttons and hold-to-place buildings. An external mouse and keyboard work too.
 
-This repo contains no Blizzard data. Players supply `data.Wargus`, extracted from a copy they own.
+WarDroid is based on [Wargus](https://wargus.github.io) ([source](https://github.com/Wargus/wargus)), which runs on the open source [Stratagus](https://github.com/Wargus/stratagus) engine. Both are GPL-2.0, and so is WarDroid. Our changes to them live in `android/patches`.
+
+This repo contains no Blizzard data. Players supply `data.Wargus`, extracted from a copy of Warcraft II they own. The folder keeps the Wargus name, as does the app's package ID `com.vaclav.wargusport`, so existing installs and their data carry over.
 
 ## Layout
 
@@ -120,4 +122,4 @@ Some routers, especially guest networks, stop devices talking to each other, and
 
 ## Upstream
 
-The submodules point at the upstream repos. To fork, create the forks on GitHub, then add them as a remote in each submodule and update `.gitmodules`.
+The submodules point at the upstream Wargus and Stratagus repos, which WarDroid is built from. To fork, create the forks on GitHub, then add them as a remote in each submodule and update `.gitmodules`.
