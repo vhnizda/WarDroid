@@ -96,6 +96,28 @@ index 4df2bce7f..0386fc061 100644
  /// Get local hostname
  extern std::string NetGetHostname();
  
+diff --git a/src/include/unittype.h b/src/include/unittype.h
+index 1389df5e5..6f6677b5c 100644
+--- a/src/include/unittype.h
++++ b/src/include/unittype.h
+@@ -267,6 +267,7 @@ class CDecoVar
+ 	bool HideNeutral = false;       /// if true, don't show for neutral unit.
+ 	bool HideAllied = false;        /// if true, don't show for allied unit. (but show own units)
+ 	bool ShowOpponent = false;      /// if true, show for opponent unit.
++	bool AboveSelectionBox = false; /// if true, Offset is from the top left of the selection box
+ 
+ 	bool BoolFlagInvert = false;    /// if 1, invert the bool flag check
+ 	int BoolFlag = -1;              /// if !=-1, show only for units with this flag
+@@ -288,6 +289,9 @@ class CDecoVarBar : public CDecoVar
+ 	int MinValue = 0;                /// show only above percent
+ 	int MaxValue = 100;              /// show only below percent
+ 	char BorderSize = 0;             /// Size of the border, 0 for no border.
++	int ColorSteps[3] = {-1, -1, -1}; /// if set, percent from which the bar is green, yellow, orange; red below
++	bool HasFixedColor = false;      /// if true, the bar is always FixedR/G/B
++	unsigned char FixedR = 0, FixedG = 0, FixedB = 0;
+ 	// FIXME color depend of percent (red, Orange, Yellow, Green...)
+ 	IntColor Color;             /// Color of bar.
+ 	IntColor BColor;            /// Color of background.
 diff --git a/src/include/viewport.h b/src/include/viewport.h
 index 734f5fe14..1f8c96b35 100644
 --- a/src/include/viewport.h
@@ -1719,6 +1741,89 @@ index 000000000..cb5fc2d83
 +}
 +
 +//@}
+diff --git a/src/unit/script_unittype.cpp b/src/unit/script_unittype.cpp
+index b37a42f21..bfa70f0ba 100644
+--- a/src/unit/script_unittype.cpp
++++ b/src/unit/script_unittype.cpp
+@@ -1958,6 +1958,7 @@ static int CclDefineDecorations(lua_State *l)
+ 		bool HideNeutral = false;
+ 		bool HideAllied = false;
+ 		bool ShowOpponent = false;
++		bool AboveSelectionBox = false;
+ 		bool BoolFlagInvert = false;
+ 		int BoolFlag = 0;
+ 	} tmp;
+@@ -1998,6 +1999,8 @@ static int CclDefineDecorations(lua_State *l)
+ 				tmp.HideAllied = LuaToBoolean(l, -1);
+ 			} else if (key == "ShowOpponent") {
+ 				tmp.ShowOpponent = LuaToBoolean(l, -1);
++			} else if (key == "AboveSelectionBox") {
++				tmp.AboveSelectionBox = LuaToBoolean(l, -1);
+ 			} else if (key == "Method") {
+ 				Assert(lua_istable(l, -1));
+ 				lua_rawgeti(l, -1, 1); // MethodName
+@@ -2034,6 +2037,15 @@ static int CclDefineDecorations(lua_State *l)
+ 							decovarbar->BorderSize = LuaToNumber(l, -1);
+ 						} else if (key == "ShowFullBackground") {
+ 							decovarbar->ShowFullBackground = LuaToBoolean(l, -1);
++						} else if (key == "ColorSteps") {
++							for (int k = 0; k < 3; ++k) {
++								decovarbar->ColorSteps[k] = LuaToNumber(l, -1, k + 1);
++							}
++						} else if (key == "Color") {
++							decovarbar->HasFixedColor = true;
++							decovarbar->FixedR = LuaToNumber(l, -1, 1);
++							decovarbar->FixedG = LuaToNumber(l, -1, 2);
++							decovarbar->FixedB = LuaToNumber(l, -1, 3);
+ #if 0 // FIXME Color configuration
+ 						} else if (key == "Color") {
+ 							decovar->Color = // FIXME
+@@ -2127,7 +2139,12 @@ static int CclDefineDecorations(lua_State *l)
+ 		decovar->HideNeutral = tmp.HideNeutral;
+ 		decovar->HideAllied = tmp.HideAllied;
+ 		decovar->ShowOpponent = tmp.ShowOpponent;
++		decovar->AboveSelectionBox = tmp.AboveSelectionBox;
+ 		decovar->BoolFlag = tmp.BoolFlag;
++		if (tmp.AboveSelectionBox && tmp.BoolFlag == 0 && !tmp.BoolFlagInvert) {
++			// The zero default would hide these bars on units with flag 0 (Coward), such as workers
++			decovar->BoolFlag = -1;
++		}
+ 		decovar->BoolFlagInvert = tmp.BoolFlagInvert;
+ 		UnitTypeVar.DecoVar.push_back(std::move(decovar));
+ 	}
+diff --git a/src/unit/unit_draw.cpp b/src/unit/unit_draw.cpp
+index 98c584549..2e0933193 100644
+--- a/src/unit/unit_draw.cpp
++++ b/src/unit/unit_draw.cpp
+@@ -460,6 +460,13 @@ void CDecoVarBar::Draw(int x, int y,
+ 	int f = var.Value * 100 / var.Max;
+ 	IntColor bcolor = ColorBlack; // Deco->Data.Bar.BColor  // Border color.
+ 	IntColor color = f > 50 ? (f > 75 ? ColorGreen : ColorYellow) : (f > 25 ? ColorOrange : ColorRed);// inside color.
++	if (this->HasFixedColor) {
++		color = Video.MapRGB(TheScreen->format, this->FixedR, this->FixedG, this->FixedB);
++	} else if (this->ColorSteps[0] >= 0) {
++		color = f >= this->ColorSteps[0] ? ColorGreen
++		      : f >= this->ColorSteps[1] ? ColorYellow
++		      : f >= this->ColorSteps[2] ? ColorOrange : ColorRed;
++	}
+ 	// Deco->Data.Bar.Color
+ 	if (b) {
+ 		if (this->ShowFullBackground) {
+@@ -650,6 +657,14 @@ static void DrawDecoration(const CUnit &unit, const CUnitType &type, const Pixel
+ 			  || (ThisPlayer->IsAllied(unit) && (unit.Player != ThisPlayer) && var.HideAllied)
+ 			  || var.BoolFlagMatches(type)
+ 			  || max == 0)) {
++			if (var.AboveSelectionBox) {
++				// Same box as DrawUnitSelection, from this top left corner
++				const PixelPos center = screenPos + type.GetPixelSize() / 2;
++				const int boxX = center.x - type.BoxWidth / 2 - (type.Width - (type.Sprite ? type.Sprite->Width : 0)) / 2 + type.BoxOffset.x;
++				const int boxY = center.y - type.BoxHeight / 2 - (type.Height - (type.Sprite ? type.Sprite->Height : 0)) / 2 + type.BoxOffset.y;
++				var.Draw(boxX + var.Offset.x, boxY + var.Offset.y, type, unit.Variable[var.Index]);
++				continue;
++			}
+ 			var.Draw(
+ 				x + var.Offset.x + var.OffsetPercent.x * unit.Type->TileWidth * PixelTileSize.x / 100,
+ 				y + var.Offset.y + var.OffsetPercent.y * unit.Type->TileHeight * PixelTileSize.y / 100,
 diff --git a/src/video/cursor.cpp b/src/video/cursor.cpp
 index e25044acd..d5d6c0a16 100644
 --- a/src/video/cursor.cpp
