@@ -1293,10 +1293,10 @@ index f4338a07f..bde2d28f3 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..fb1a3fe12
+index 000000000..deeccc7d5
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,924 @@
+@@ -0,0 +1,927 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -1376,6 +1376,11 @@ index 000000000..fb1a3fe12
 +static constexpr int ButtonHeight = 53;
 +/// Gap between neighbouring buttons.
 +static constexpr int ButtonGap = 5;
++/// The deselect button is 30% bigger than the group buttons, with a wider
++/// gap on each side so it's easy to hit without touching a group button.
++static constexpr int DeselectWidth = ButtonWidth * 13 / 10;
++static constexpr int DeselectHeight = ButtonHeight * 13 / 10;
++static constexpr int DeselectGap = 15;
 +/// Number of group buttons, left of the deselect button.
 +static constexpr int GroupButtons = 4;
 +/// How long a group button is held to save the selection into it.
@@ -1422,28 +1427,25 @@ index 000000000..fb1a3fe12
 +	                UI.MapArea.EndY - ControlMargin - JoystickRadius);
 +}
 +
-+/// Top left of a button slot, counted from the right: 0 is the deselect
-+/// button, then groups 4 to 1.
-+static PixelPos ButtonTopLeft(int slot)
++static PixelPos DeselectTopLeft()
 +{
-+	return PixelPos(UI.MapArea.EndX - ControlMargin - ButtonWidth - slot * (ButtonWidth + ButtonGap),
++	return PixelPos(UI.MapArea.EndX - DeselectGap - DeselectWidth,
++	                UI.MapArea.EndY - ControlMargin - DeselectHeight);
++}
++
++/// Top left of a group button: 4 is nearest the deselect button.
++static PixelPos GroupTopLeft(int group)
++{
++	const int right = DeselectTopLeft().x - DeselectGap;
++	return PixelPos(right - ButtonWidth - (GroupButtons - group) * (ButtonWidth + ButtonGap),
 +	                UI.MapArea.EndY - ControlMargin - ButtonHeight);
 +}
 +
-+static PixelPos DeselectTopLeft()
++static bool IsOnButton(const PixelPos &topLeft, const PixelPos &screenPos,
++                       int width = ButtonWidth, int height = ButtonHeight)
 +{
-+	return ButtonTopLeft(0);
-+}
-+
-+static PixelPos GroupTopLeft(int group)
-+{
-+	return ButtonTopLeft(GroupButtons + 1 - group);
-+}
-+
-+static bool IsOnButton(const PixelPos &topLeft, const PixelPos &screenPos)
-+{
-+	return screenPos.x >= topLeft.x && screenPos.x < topLeft.x + ButtonWidth
-+	       && screenPos.y >= topLeft.y && screenPos.y < topLeft.y + ButtonHeight;
++	return screenPos.x >= topLeft.x && screenPos.x < topLeft.x + width
++	       && screenPos.y >= topLeft.y && screenPos.y < topLeft.y + height;
 +}
 +
 +/// Group button under the screen position, 1 to GroupButtons, or 0.
@@ -1489,7 +1491,7 @@ index 000000000..fb1a3fe12
 +
 +static bool IsOnDeselect(const PixelPos &screenPos)
 +{
-+	return IsOnButton(DeselectTopLeft(), screenPos);
++	return IsOnButton(DeselectTopLeft(), screenPos, DeselectWidth, DeselectHeight);
 +}
 +
 +/// Save the selected units, if they are the player's, into a group.
@@ -1756,29 +1758,30 @@ index 000000000..fb1a3fe12
 +
 +
 +/// One of the game's buttons cut into a box.
-+static void DrawButtonBox(const char *file, const PixelPos &topLeft)
++static void DrawButtonBox(const char *file, const PixelPos &topLeft,
++                          int width = ButtonWidth, int height = ButtonHeight)
 +{
-+	std::shared_ptr<CGraphic> &graphic = ButtonGraphics[file];
++	std::shared_ptr<CGraphic> &graphic = ButtonGraphics[std::string(file) + "@" + std::to_string(height)];
 +	if (!graphic) {
 +		graphic = CGraphic::ForceNew(file);
 +		graphic->Load();
 +		// Scale to the box's height, then use both ends so it keeps its bevel.
-+		graphic->Resize(graphic->Width * ButtonHeight / graphic->Height, ButtonHeight);
++		graphic->Resize(graphic->Width * height / graphic->Height, height);
 +	}
-+	const int half = ButtonWidth / 2;
-+	graphic->DrawSubClip(0, 0, half, ButtonHeight, topLeft.x, topLeft.y);
-+	graphic->DrawSubClip(graphic->Width - (ButtonWidth - half), 0,
-+	                     ButtonWidth - half, ButtonHeight, topLeft.x + half, topLeft.y);
++	const int half = width / 2;
++	graphic->DrawSubClip(0, 0, half, height, topLeft.x, topLeft.y);
++	graphic->DrawSubClip(graphic->Width - (width - half), 0,
++	                     width - half, height, topLeft.x + half, topLeft.y);
 +}
 +
 +/// The blue button with a gold X on it.
 +static void DrawDeselectButton(const PixelPos &topLeft)
 +{
-+	DrawButtonBox(BlueButtonFile, topLeft);
++	DrawButtonBox(BlueButtonFile, topLeft, DeselectWidth, DeselectHeight);
 +
-+	// About as tall as the group buttons' numbers.
-+	const int size = 19;
-+	const PixelPos a(topLeft.x + (ButtonWidth - size) / 2, topLeft.y + (ButtonHeight - size) / 2);
++	// Grown with the button, 30% bigger than the group buttons' numbers.
++	const int size = 25;
++	const PixelPos a(topLeft.x + (DeselectWidth - size) / 2, topLeft.y + (DeselectHeight - size) / 2);
 +	const PixelPos b = a + PixelDiff(size, size);
 +	const Uint32 shadow = Rgb(40, 24, 0);
 +	const Uint32 gold = Rgb(252, 204, 52);
