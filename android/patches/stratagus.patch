@@ -617,6 +617,22 @@ index ec8b15d03..c7b5d82d1 100644
  
  	// FIXME: peon/peasant with gold/wood & co are considered from
  	//   different type... idem for tankers
+diff --git a/src/ui/botpanel.cpp b/src/ui/botpanel.cpp
+index d739471b8..5f073a1df 100644
+--- a/src/ui/botpanel.cpp
++++ b/src/ui/botpanel.cpp
+@@ -535,6 +535,11 @@ static struct PopupDrawCache {
+ */
+ void DrawPopup(const ButtonAction &button, const CUIButton &uibutton, int x, int y)
+ {
++#ifdef __ANDROID__
++	// WarDroid has no button pop-ups: after a tap the pointer stays on the
++	// button panel, and the pop-up covers the next buttons to choose from.
++	return;
++#endif
+ 	if (button.Popup.empty()) {
+ 		return;
+ 	}
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
 index f4338a07f..4e22011ff 100644
 --- a/src/ui/mouse.cpp
