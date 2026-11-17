@@ -27,21 +27,30 @@ index f44cf547b..0a9b57716 100644
  					DebugPrint("Flushing removed unit\n");
  					// This happens, if building with ALT+SHIFT.
 diff --git a/src/include/cursor.h b/src/include/cursor.h
-index c9943b60d..116d6550e 100644
+index c9943b60d..8c69954f3 100644
 --- a/src/include/cursor.h
 +++ b/src/include/cursor.h
-@@ -188,6 +188,9 @@ extern CCursor *GameCursor;     /// cursor-type
+@@ -188,6 +188,18 @@ extern CCursor *GameCursor;     /// cursor-type
  extern PixelPos CursorScreenPos; /// cursor position on screen
  extern PixelPos CursorStartScreenPos; /// rectangle started on screen
  extern PixelPos CursorStartMapPos; /// the same in screen map coordinate system
 +extern bool CursorFromTouch;     /// last pointer input was a finger, so no cursor is drawn
 +/// Pointer moved far enough since the press to make a selection box
 +extern bool IsSelectionDrag();
++/// A finger other than the pointer's holds the building being placed
++extern bool BuildingFingerHeld;
++/// Screen position of that finger
++extern PixelPos BuildingFingerPos;
++/// Screen position the building being placed follows
++extern PixelPos BuildingCursorScreenPos();
++/// Map tile of the top left corner of the building being placed. With a
++/// finger, the building sits above and left of it so the finger doesn't hide it.
++extern Vec2i BuildingCursorTilePos();
  
  /*----------------------------------------------------------------------------
  --  Functions
 diff --git a/src/include/interface.h b/src/include/interface.h
-index 1a210eb57..f15dd6747 100644
+index 1a210eb57..660daebb1 100644
 --- a/src/include/interface.h
 +++ b/src/include/interface.h
 @@ -43,6 +43,7 @@
@@ -52,7 +61,7 @@ index 1a210eb57..f15dd6747 100644
  #include <optional>
  #include <vector>
  
-@@ -396,6 +397,22 @@ extern void UpdateTimer();
+@@ -396,6 +397,26 @@ extern void UpdateTimer();
  extern void UpdateStatusLineForButton(const ButtonAction &button);
  /// Draw the Pie Menu
  extern void DrawPieMenu();
@@ -72,6 +81,10 @@ index 1a210eb57..f15dd6747 100644
 +extern bool TouchControlsPinching();
 +/// A tap on the map from a finger other than the pointer's
 +extern void MapTapAt(const PixelPos &screenPos);
++/// The pointer's finger is holding a building to place it on release
++extern bool TouchBuildHeld();
++/// Another finger let go of the building it held: place it where it shows
++extern void TouchPlaceBuilding();
  /// Draw the button popup
  extern void DrawPopup(const ButtonAction &button, const CUIButton &uibutton, int x = 0, int y = 0);
  
@@ -634,7 +647,7 @@ index d739471b8..5f073a1df 100644
  		return;
  	}
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..4e22011ff 100644
+index f4338a07f..c90638225 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
 @@ -707,6 +707,133 @@ void DoRightButton(const PixelPos &mapPixelPos)
@@ -781,7 +794,7 @@ index f4338a07f..4e22011ff 100644
  
  	OldCursorOn = CursorOn;
  	//  Selecting units.
-@@ -1686,6 +1816,37 @@ static void UISelectStateButtonDown(unsigned)
+@@ -1686,6 +1816,57 @@ static void UISelectStateButtonDown(unsigned)
  }
  
  
@@ -795,7 +808,7 @@ index f4338a07f..4e22011ff 100644
 +*/
 +static void PlaceCursorBuilding()
 +{
-+	const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
++	const Vec2i tilePos = BuildingCursorTilePos();
 +	bool explored = CanBuildOnArea(*Selected[0], tilePos);
 +
 +	// 0 Test build, don't really build
@@ -816,10 +829,30 @@ index f4338a07f..4e22011ff 100644
 +	}
 +}
 +
++/// The pointer's finger is holding a building to place it on release.
++bool TouchBuildHeld()
++{
++	return TouchBuildPending;
++}
++
++/**
++**  A finger other than the pointer's let go of the building it was holding
++**  on the map: place the building where it shows.
++*/
++void TouchPlaceBuilding()
++{
++	if (!CursorBuilding || TouchControlsPinching() || Selected.empty() || !Selected[0]
++	    || GameObserve || GamePaused || GameEstablishing
++	    || !UI.MouseViewport->IsInsideMapArea(BuildingCursorScreenPos())) {
++		return;
++	}
++	PlaceCursorBuilding();
++}
++
  static void UIHandleButtonDown_OnMap(unsigned button)
  {
  	Assert(UI.MouseViewport);
-@@ -1699,27 +1860,16 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+@@ -1699,27 +1880,16 @@ static void UIHandleButtonDown_OnMap(unsigned button)
  	if (CursorBuilding) {
  		// Possible Selected[0] was removed from map
  		// need to make sure there is a unit to build
@@ -855,7 +888,7 @@ index f4338a07f..4e22011ff 100644
  		} else {
  			CancelBuildingMode();
  		}
-@@ -1754,6 +1904,8 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+@@ -1754,6 +1924,8 @@ static void UIHandleButtonDown_OnMap(unsigned button)
  			DoRightButton(mapPixelPos);
  		}
  	} else if (MouseButtons & LeftButton) { // enter select mode
@@ -864,7 +897,7 @@ index f4338a07f..4e22011ff 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -1914,6 +2066,15 @@ void UIHandleButtonDown(unsigned button)
+@@ -1914,6 +2086,15 @@ void UIHandleButtonDown(unsigned button)
  		ActionDraw();
  		return;
  	}
@@ -880,7 +913,7 @@ index f4338a07f..4e22011ff 100644
  
  	static bool OldShowSightRange;
  	static bool OldShowReactionRange;
-@@ -1924,7 +2085,8 @@ void UIHandleButtonDown(unsigned button)
+@@ -1924,7 +2105,8 @@ void UIHandleButtonDown(unsigned button)
  	// Reset the ShowNameDelay counters
  	ShowNameDelay = ShowNameTime = GameCycle;
  
@@ -890,7 +923,7 @@ index f4338a07f..4e22011ff 100644
  		if (!OldValid) {
  			OldShowSightRange = Preference.ShowSightRange;
  			OldShowAttackRange = Preference.ShowAttackRange;
-@@ -1984,6 +2146,20 @@ void UIHandleButtonDown(unsigned button)
+@@ -1984,6 +2166,20 @@ void UIHandleButtonDown(unsigned button)
  */
  void UIHandleButtonUp(unsigned button)
  {
@@ -911,7 +944,7 @@ index f4338a07f..4e22011ff 100644
  	//
  	//  Move map.
  	//
-@@ -2084,10 +2260,9 @@ void UIHandleButtonUp(unsigned button)
+@@ -2084,10 +2280,9 @@ void UIHandleButtonUp(unsigned button)
  	if (CursorState == CursorStates::Rectangle && !(MouseButtons & LeftButton)) { // leave select mode
  		int num = 0;
  		//
@@ -924,7 +957,7 @@ index f4338a07f..4e22011ff 100644
  			PixelPos pos0 = CursorStartMapPos;
  			const PixelPos cursorMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  			PixelPos pos1 = cursorMapPos;
-@@ -2128,7 +2303,13 @@ void UIHandleButtonUp(unsigned button)
+@@ -2128,7 +2323,13 @@ void UIHandleButtonUp(unsigned button)
  
  				unit = UnitOnScreen(cursorMapPos.x, cursorMapPos.y);
  			}
@@ -939,7 +972,7 @@ index f4338a07f..4e22011ff 100644
  				// FIXME: Not nice coded, button number hardcoded!
  				if ((KeyModifiers & ModifierControl)
  					|| (button & (1 << MouseDoubleShift))) {
-@@ -2159,8 +2340,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -2159,8 +2360,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
@@ -962,10 +995,10 @@ index f4338a07f..4e22011ff 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..cb5fc2d83
+index 000000000..62d2a8e20
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,791 @@
+@@ -0,0 +1,904 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -1071,6 +1104,15 @@ index 000000000..cb5fc2d83
 +static Uint32 LastScrollTicks = 0;
 +static double ScrollRemainderX = 0;
 +static double ScrollRemainderY = 0;
++/// The joystick is held by a finger other than the pointer's, such as while
++/// the pointer's finger holds a building to place.
++static bool JoystickByFinger = false;
++static SDL_FingerID JoystickFingerId = 0;
++/// The pointer's finger pressed the joystick while another finger held it,
++/// so its release is ignored too.
++static bool PointerPressIgnored = false;
++/// The finger holding a building while the pointer's finger holds the joystick.
++static SDL_FingerID BuildingFingerId = 0;
 +
 +/*----------------------------------------------------------------------------
 +--  Functions
@@ -1491,7 +1533,11 @@ index 000000000..cb5fc2d83
 +	}
 +	// Holding a control still sends a long press, which mustn't start
 +	// a selection box.
-+	if (JoystickHeld || PressedGroup) {
++	if ((JoystickHeld && !JoystickByFinger) || PressedGroup) {
++		return true;
++	}
++	if (JoystickByFinger && IsOnJoystick(screenPos)) {
++		PointerPressIgnored = true;
 +		return true;
 +	}
 +	if (const int group = GroupAt(screenPos)) {
@@ -1523,14 +1569,21 @@ index 000000000..cb5fc2d83
 +*/
 +bool TouchControlsMouseMove(const PixelPos &screenPos)
 +{
-+	if (PressedGroup) {
++	if (PressedGroup || PointerPressIgnored) {
 +		return true;
 +	}
-+	if (!JoystickHeld) {
++	if (!JoystickHeld || JoystickByFinger) {
 +		return false;
 +	}
 +	MoveKnob(screenPos);
 +	return true;
++}
++
++static void ReleaseJoystick()
++{
++	JoystickHeld = false;
++	JoystickByFinger = false;
++	KnobOffset = PixelDiff(0, 0);
 +}
 +
 +/**
@@ -1548,11 +1601,14 @@ index 000000000..cb5fc2d83
 +		PressedGroup = 0;
 +		return true;
 +	}
-+	if (!JoystickHeld) {
++	if (PointerPressIgnored) {
++		PointerPressIgnored = false;
++		return true;
++	}
++	if (!JoystickHeld || JoystickByFinger) {
 +		return false;
 +	}
-+	JoystickHeld = false;
-+	KnobOffset = PixelDiff(0, 0);
++	ReleaseJoystick();
 +	return true;
 +}
 +
@@ -1560,6 +1616,62 @@ index 000000000..cb5fc2d83
 +**  Scroll the map at an even speed in the direction the joystick points.
 +**  Called once per displayed frame.
 +*/
++/// How close to the edge of the map view a finger or the building it holds
++/// must come to scroll the view, in screen pixels.
++static constexpr int EdgeScrollBand = 24;
++static constexpr double EdgeScrollSpeed = 360;
++static Uint32 EdgeScrollTicks = 0;
++static double EdgeRemainderX = 0;
++static double EdgeRemainderY = 0;
++
++/**
++**  While a finger holds a building to place, scroll the view when the finger
++**  comes near the right or bottom edge, or the building, which shows above
++**  and left of the finger, comes near the left or top edge.
++*/
++static void EdgeScroll()
++{
++	const bool holding = CursorBuilding && (TouchBuildHeld() || BuildingFingerHeld)
++	                     && ControlsShown() && !TouchControlsPinching();
++	const Uint32 now = SDL_GetTicks();
++	const double seconds = std::min((now - EdgeScrollTicks) / 1000.0, 0.1);
++	const bool started = EdgeScrollTicks != 0;
++	EdgeScrollTicks = holding ? now : 0;
++	if (!holding || !started) {
++		EdgeRemainderX = EdgeRemainderY = 0;
++		return;
++	}
++	CViewport &vp = *UI.SelectedViewport;
++	const PixelPos finger = BuildingCursorScreenPos();
++	const PixelPos building = vp.TilePosToScreen_TopLeft(BuildingCursorTilePos());
++	const PixelPos topLeft = vp.GetTopLeftPos();
++	const PixelPos bottomRight = vp.GetBottomRightPos();
++	int dx = 0;
++	int dy = 0;
++	if (finger.x >= bottomRight.x - EdgeScrollBand) {
++		dx = 1;
++	} else if (building.x <= topLeft.x + EdgeScrollBand || finger.x <= topLeft.x + EdgeScrollBand) {
++		dx = -1;
++	}
++	if (finger.y >= bottomRight.y - EdgeScrollBand) {
++		dy = 1;
++	} else if (building.y <= topLeft.y + EdgeScrollBand || finger.y <= topLeft.y + EdgeScrollBand) {
++		dy = -1;
++	}
++	if (!dx && !dy) {
++		EdgeRemainderX = EdgeRemainderY = 0;
++		return;
++	}
++	EdgeRemainderX += dx * EdgeScrollSpeed * seconds / vp.Zoom;
++	EdgeRemainderY += dy * EdgeScrollSpeed * seconds / vp.Zoom;
++	const PixelDiff step(static_cast<int>(EdgeRemainderX), static_cast<int>(EdgeRemainderY));
++	EdgeRemainderX -= step.x;
++	EdgeRemainderY -= step.y;
++	if (step.x || step.y) {
++		vp.Set(vp.MapPos, vp.Offset + step);
++	}
++}
++
 +void TouchControlsScroll()
 +{
 +	// Save into a group once its button has been held long enough, so the
@@ -1568,11 +1680,12 @@ index 000000000..cb5fc2d83
 +		SaveGroup(PressedGroup);
 +		PressedGroupSaved = true;
 +	}
++	EdgeScroll();
 +	if (!JoystickHeld) {
 +		return;
 +	}
 +	if (!ControlsShown()) {
-+		TouchControlsButtonUp();
++		ReleaseJoystick();
 +		return;
 +	}
 +	const Uint32 now = SDL_GetTicks();
@@ -1710,9 +1823,26 @@ index 000000000..cb5fc2d83
 +void TouchControlsFinger(const SDL_TouchFingerEvent &event)
 +{
 +	const PixelPrecise pos(event.x * Video.Width, event.y * Video.Height);
++	const PixelPos screenPos(static_cast<int>(pos.x), static_cast<int>(pos.y));
 +	switch (event.type) {
 +		case SDL_FINGERDOWN:
-+			if (JoystickHeld && ControlsShown()) {
++			if (ControlsShown() && CursorBuilding && TouchBuildHeld() && !JoystickHeld
++			    && IsOnJoystick(screenPos)) {
++				// The pointer's finger holds a building: this one scrolls.
++				JoystickHeld = true;
++				JoystickByFinger = true;
++				JoystickFingerId = event.fingerId;
++				LastScrollTicks = SDL_GetTicks();
++				ScrollRemainderX = ScrollRemainderY = 0;
++				MoveKnob(screenPos);
++			} else if (ControlsShown() && CursorBuilding && JoystickHeld && !JoystickByFinger
++			           && !BuildingFingerHeld && IsOnMap(pos)) {
++				// The pointer's finger holds the joystick: this one holds the
++				// building and places it on release.
++				BuildingFingerHeld = true;
++				BuildingFingerId = event.fingerId;
++				BuildingFingerPos = screenPos;
++			} else if (JoystickHeld && !JoystickByFinger && ControlsShown()) {
 +				ExtraFingers[event.fingerId] = {pos, SDL_GetTicks()};
 +			}
 +			Fingers[event.fingerId] = pos;
@@ -1723,11 +1853,27 @@ index 000000000..cb5fc2d83
 +			break;
 +		case SDL_FINGERMOTION:
 +			Fingers[event.fingerId] = pos;
++			if (JoystickByFinger && event.fingerId == JoystickFingerId) {
++				MoveKnob(screenPos);
++			}
++			if (BuildingFingerHeld && event.fingerId == BuildingFingerId) {
++				BuildingFingerPos = screenPos;
++			}
 +			if (Pinching && Fingers.size() == 2 && ControlsShown()) {
 +				UpdatePinch();
 +			}
 +			break;
 +		case SDL_FINGERUP:
++			if (JoystickByFinger && event.fingerId == JoystickFingerId) {
++				ReleaseJoystick();
++			}
++			if (BuildingFingerHeld && event.fingerId == BuildingFingerId) {
++				BuildingFingerPos = screenPos;
++				if (IsOnMap(pos) && ControlsShown()) {
++					TouchPlaceBuilding();
++				}
++				BuildingFingerHeld = false;
++			}
 +			if (auto extra = ExtraFingers.find(event.fingerId); extra != ExtraFingers.end()) {
 +				const ExtraFinger finger = extra->second;
 +				ExtraFingers.erase(extra);
@@ -1841,10 +1987,10 @@ index 98c584549..2e0933193 100644
  				x + var.Offset.x + var.OffsetPercent.x * unit.Type->TileWidth * PixelTileSize.x / 100,
  				y + var.Offset.y + var.OffsetPercent.y * unit.Type->TileHeight * PixelTileSize.y / 100,
 diff --git a/src/video/cursor.cpp b/src/video/cursor.cpp
-index e25044acd..d5d6c0a16 100644
+index e25044acd..3519abe7c 100644
 --- a/src/video/cursor.cpp
 +++ b/src/video/cursor.cpp
-@@ -77,6 +77,24 @@ PixelPos CursorScreenPos;    /// cursor position on screen
+@@ -77,10 +77,55 @@ PixelPos CursorScreenPos;    /// cursor position on screen
  PixelPos CursorStartScreenPos;  /// rectangle started on screen
  PixelPos CursorStartMapPos;/// position of starting point of selection rectangle, in Map pixels.
  
@@ -1869,7 +2015,47 @@ index e25044acd..d5d6c0a16 100644
  
  /*--- DRAW BUILDING  CURSOR ------------------------------------------------*/
  CUnitType *CursorBuilding;           /// building cursor
-@@ -323,7 +341,7 @@ void DrawCursor()
+ 
++bool BuildingFingerHeld = false;
++PixelPos BuildingFingerPos(0, 0);
++
++/// Free tiles between a finger and the bottom right corner of the building it places.
++static constexpr int TouchBuildingGapTiles = 2;
++
++PixelPos BuildingCursorScreenPos()
++{
++	return BuildingFingerHeld ? BuildingFingerPos : CursorScreenPos;
++}
++
++Vec2i BuildingCursorTilePos()
++{
++	Vec2i pos = UI.MouseViewport->ScreenToTilePos(BuildingCursorScreenPos());
++	if (CursorFromTouch && CursorBuilding) {
++		pos.x -= TouchBuildingGapTiles + CursorBuilding->TileWidth - 1;
++		pos.y -= TouchBuildingGapTiles + CursorBuilding->TileHeight - 1;
++		if (pos.x < 0) {
++			pos.x = 0;
++		}
++		if (pos.y < 0) {
++			pos.y = 0;
++		}
++	}
++	return pos;
++}
++
+ 
+ /*--- DRAW SPRITE CURSOR ---------------------------------------------------*/
+ CCursor *GameCursor;                 /// current shown cursor-type
+@@ -230,7 +275,7 @@ static void DrawBuildingCursor()
+ {
+ 	// Align to grid
+ 	const CViewport &vp = *UI.MouseViewport;
+-	const Vec2i mpos = vp.ScreenToTilePos(CursorScreenPos);
++	const Vec2i mpos = BuildingCursorTilePos();
+ 	const PixelPos screenPos = vp.TilePosToScreen_TopLeft(mpos);
+ 
+ 	//
+@@ -323,11 +368,13 @@ void DrawCursor()
  	}
  
  	// Selecting rectangle
@@ -1878,7 +2064,14 @@ index e25044acd..d5d6c0a16 100644
  		const PixelPos cursorStartScreenPos = UI.MouseViewport->MapToScreenPixelPos(CursorStartMapPos);
  
  		DrawVisibleRectangleCursor(cursorStartScreenPos, CursorScreenPos);
-@@ -342,6 +360,15 @@ void DrawCursor()
+-	} else if (CursorBuilding && CursorOn == ECursorOn::Map) {
++	} else if (CursorBuilding
++	           && (CursorFromTouch ? (TouchBuildHeld() || BuildingFingerHeld) : CursorOn == ECursorOn::Map)) {
++		// A finger shows the building only while it holds it.
+ 		// Selecting position for building
+ 		DrawBuildingCursor();
+ 	}
+@@ -342,6 +389,15 @@ void DrawCursor()
  		return;
  	}
  
