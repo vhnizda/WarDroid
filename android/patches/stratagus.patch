@@ -1348,10 +1348,10 @@ index f4338a07f..c96538826 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..dcdccb0df
+index 000000000..3805826e2
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,998 @@
+@@ -0,0 +1,1094 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -1392,6 +1392,7 @@ index 000000000..dcdccb0df
 +#include "interface.h"
 +#include "map.h"
 +#include "network.h"
++#include "player.h"
 +#include "sound.h"
 +#include "ui.h"
 +#include "unit.h"
@@ -1401,6 +1402,7 @@ index 000000000..dcdccb0df
 +#include <cmath>
 +#include <map>
 +#include <string>
++#include <vector>
 +
 +/*----------------------------------------------------------------------------
 +--  Variables
@@ -1545,6 +1547,7 @@ index 000000000..dcdccb0df
 +}
 +
 +static bool IsOnDeselect(const PixelPos &screenPos);
++static bool IsOnIdle(const PixelPos &screenPos);
 +
 +/// A finger is holding a building to place.
 +static bool HoldingBuilding()
@@ -1555,7 +1558,7 @@ index 000000000..dcdccb0df
 +/// Over the deselect or a group button, where a held building isn't placed.
 +static bool IsOnBottomButtons(const PixelPos &screenPos)
 +{
-+	return GroupAt(screenPos) || (DeselectShown() && IsOnDeselect(screenPos));
++	return GroupAt(screenPos) || (DeselectShown() && IsOnDeselect(screenPos)) || IsOnIdle(screenPos);
 +}
 +
 +bool TouchControlsBuildingDrop(const PixelPos &screenPos)
@@ -1570,12 +1573,40 @@ index 000000000..dcdccb0df
 +		CursorState = CursorStates::Point;
 +		return true;
 +	}
-+	return GroupAt(screenPos) != 0;
++	return GroupAt(screenPos) != 0 || IsOnIdle(screenPos);
 +}
 +
 +static bool IsOnDeselect(const PixelPos &screenPos)
 +{
 +	return IsOnButton(DeselectTopLeft(), screenPos, DeselectWidth, DeselectHeight);
++}
++
++/// The idle worker button shows while any worker or oil tanker stands idle.
++static bool IdleShown()
++{
++	return ControlsShown() && ThisPlayer && !ThisPlayer->GetFreeWorkers().empty();
++}
++
++/// Left of the group buttons.
++static PixelPos IdleTopLeft()
++{
++	return GroupTopLeft(1) - PixelDiff(ButtonGap + ButtonWidth, 0);
++}
++
++static bool IsOnIdle(const PixelPos &screenPos)
++{
++	return IdleShown() && IsOnButton(IdleTopLeft(), screenPos);
++}
++
++/// Select the next idle worker and centre the view on it.
++static void PressIdle()
++{
++	if (CursorBuilding || CurrentButtonLevel != 0 || CursorState == CursorStates::Select) {
++		CancelBuildingMode();
++		GameCursor = UI.Point.Cursor;
++		CursorState = CursorStates::Point;
++	}
++	UiFindIdleWorker();
 +}
 +
 +/// Save the selected units, if they are the player's, into a group.
@@ -1871,20 +1902,75 @@ index 000000000..dcdccb0df
 +
 +
 +/// One of the game's buttons cut into a box.
-+static void DrawButtonBox(const char *file, const PixelPos &topLeft,
-+                          int width = ButtonWidth, int height = ButtonHeight)
++/// Recolour a surface to gold, keeping its light and shade, so a button
++/// keeps the game's stone texture.
++static void TintGold(SDL_Surface *surface)
 +{
-+	std::shared_ptr<CGraphic> &graphic = ButtonGraphics[std::string(file) + "@" + std::to_string(height)];
++	const auto gold = [](Uint8 &r, Uint8 &g, Uint8 &b) {
++		const double light = (0.3 * r + 0.59 * g + 0.11 * b) / 255.0;
++		const double v = std::min(1.0, 0.35 + light * 1.8);
++		r = static_cast<Uint8>(255 * v);
++		g = static_cast<Uint8>(200 * v);
++		b = static_cast<Uint8>(30 * v);
++	};
++	if (SDL_Palette *palette = surface->format->palette) {
++		std::vector<SDL_Color> colors(palette->colors, palette->colors + palette->ncolors);
++		for (SDL_Color &c : colors) {
++			gold(c.r, c.g, c.b);
++		}
++		SDL_SetPaletteColors(palette, colors.data(), 0, palette->ncolors);
++		return;
++	}
++	if (surface->format->BytesPerPixel != 4) {
++		return;
++	}
++	SDL_LockSurface(surface);
++	for (int y = 0; y < surface->h; ++y) {
++		Uint32 *row = reinterpret_cast<Uint32 *>(static_cast<Uint8 *>(surface->pixels) + y * surface->pitch);
++		for (int x = 0; x < surface->w; ++x) {
++			Uint8 r, g, b, a;
++			SDL_GetRGBA(row[x], surface->format, &r, &g, &b, &a);
++			gold(r, g, b);
++			row[x] = SDL_MapRGBA(surface->format, r, g, b, a);
++		}
++	}
++	SDL_UnlockSurface(surface);
++}
++
++static void DrawButtonBox(const char *file, const PixelPos &topLeft,
++                          int width = ButtonWidth, int height = ButtonHeight, bool gold = false)
++{
++	std::shared_ptr<CGraphic> &graphic =
++		ButtonGraphics[std::string(file) + "@" + std::to_string(height) + (gold ? "-gold" : "")];
 +	if (!graphic) {
 +		graphic = CGraphic::ForceNew(file);
 +		graphic->Load();
 +		// Scale to the box's height, then use both ends so it keeps its bevel.
 +		graphic->Resize(graphic->Width * height / graphic->Height, height);
++		if (gold) {
++			TintGold(graphic->getSurface());
++		}
 +	}
 +	const int half = width / 2;
 +	graphic->DrawSubClip(0, 0, half, height, topLeft.x, topLeft.y);
 +	graphic->DrawSubClip(graphic->Width - (width - half), 0,
 +	                     width - half, height, topLeft.x + half, topLeft.y);
++}
++
++/// The yellow button with a black ! on it, shown while workers stand idle.
++static void DrawIdleButton(const PixelPos &topLeft)
++{
++	DrawButtonBox(BlueButtonFile, topLeft, ButtonWidth, ButtonHeight, true);
++
++	const Uint32 black = Rgb(0, 0, 0);
++	const int barWidth = 6;
++	const int barHeight = 21;
++	const int gap = 4;
++	const int dot = 6;
++	const int x = topLeft.x + (ButtonWidth - barWidth) / 2;
++	const int y = topLeft.y + (ButtonHeight - (barHeight + gap + dot)) / 2;
++	Video.FillRectangleClip(black, x, y, barWidth, barHeight);
++	Video.FillRectangleClip(black, x, y + barHeight + gap, dot, dot);
 +}
 +
 +/// The blue button with a gold X on it.
@@ -1945,6 +2031,9 @@ index 000000000..dcdccb0df
 +	for (int group = 1; group <= GroupButtons; ++group) {
 +		DrawGroupButton(group);
 +	}
++	if (IdleShown()) {
++		DrawIdleButton(IdleTopLeft());
++	}
 +	if (DeselectShown()) {
 +		const PixelPos topLeft = DeselectTopLeft();
 +		const bool holding = HoldingBuilding();
@@ -1978,6 +2067,11 @@ index 000000000..dcdccb0df
 +	}
 +	if (JoystickByFinger && IsInJoystickZone(screenPos)) {
 +		PointerPressIgnored = true;
++		return true;
++	}
++	if (IsOnIdle(screenPos)) {
++		PressIdle();
++		PointerPressIgnored = true; // its moves and release too
 +		return true;
 +	}
 +	if (const int group = GroupAt(screenPos)) {
@@ -2197,7 +2291,7 @@ index 000000000..dcdccb0df
 +{
 +	const PixelPos screenPos(static_cast<int>(pos.x), static_cast<int>(pos.y));
 +	return UI.SelectedViewport->Contains(screenPos) && !IsInJoystickZone(screenPos)
-+	       && !GroupAt(screenPos) && !(DeselectShown() && IsOnDeselect(screenPos));
++	       && !GroupAt(screenPos) && !(DeselectShown() && IsOnDeselect(screenPos)) && !IsOnIdle(screenPos);
 +}
 +
 +static void StartPinch()
@@ -2255,6 +2349,8 @@ index 000000000..dcdccb0df
 +	const PixelPos screenPos(static_cast<int>(pos.x), static_cast<int>(pos.y));
 +	if (DeselectShown() && IsOnDeselect(screenPos)) {
 +		PressDeselect();
++	} else if (IsOnIdle(screenPos)) {
++		PressIdle();
 +	} else if (const int group = GroupAt(screenPos)) {
 +		RecallGroup(group);
 +	} else if (!IsInJoystickZone(screenPos)) {
