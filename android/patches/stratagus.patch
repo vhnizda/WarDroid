@@ -773,6 +773,47 @@ index d739471b8..5f073a1df 100644
  	if (button.Popup.empty()) {
  		return;
  	}
+diff --git a/src/ui/interface.cpp b/src/ui/interface.cpp
+index 5fea085d8..406b99050 100644
+--- a/src/ui/interface.cpp
++++ b/src/ui/interface.cpp
+@@ -1322,6 +1322,11 @@ static PixelPos LastMousePos;     /// Last mouse position
+ static unsigned LastMouseButton;  /// last mouse button handled
+ static unsigned StartMouseTicks;  /// Ticks of first click
+ static unsigned LastMouseTicks;   /// Ticks of last mouse event
++static PixelPos StartMousePos;    /// Where the first click of a double click went down
++
++/// How far a finger may land from its first tap and still make a double tap.
++/// A mouse must not move at all.
++static constexpr int DoubleTapSlop = 16;
+ 
+ /**
+ **  Called if any mouse button is pressed down
+@@ -1349,6 +1354,7 @@ void InputMouseButtonPress(const EventCallback &callbacks,
+ 			MouseState = InitialMouseState;
+ 			StartMouseTicks = ticks;
+ 			LastMouseButton = button;
++			StartMousePos = LastMousePos;
+ 		}
+ 	}
+ 	LastMouseTicks = ticks;
+@@ -1406,9 +1412,14 @@ void InputMouseMove(const EventCallback &callbacks,
+ 					unsigned ticks, int x, int y)
+ {
+ 	PixelPos mousePos(x, y);
+-	// Don't reset the mouse state unless we really moved
++	// Don't reset the mouse state unless we really moved. A finger lands a few
++	// pixels from its last tap, so it must move further to break a double tap.
+ 	if (LastMousePos != mousePos) {
+-		MouseState = InitialMouseState;
++		if (!CursorFromTouch
++		    || std::abs(mousePos.x - StartMousePos.x) > DoubleTapSlop
++		    || std::abs(mousePos.y - StartMousePos.y) > DoubleTapSlop) {
++			MouseState = InitialMouseState;
++		}
+ 		LastMouseTicks = ticks;
+ 		LastMousePos = mousePos;
+ 	}
 diff --git a/src/ui/mainscr.cpp b/src/ui/mainscr.cpp
 index 16ba28641..20c331529 100644
 --- a/src/ui/mainscr.cpp
