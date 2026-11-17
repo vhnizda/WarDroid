@@ -26,6 +26,73 @@ index f44cf547b..0a9b57716 100644
  				} else {
  					DebugPrint("Flushing removed unit\n");
  					// This happens, if building with ALT+SHIFT.
+diff --git a/src/game/loadgame.cpp b/src/game/loadgame.cpp
+index 3fb3ed6fb..1cf7cdffc 100644
+--- a/src/game/loadgame.cpp
++++ b/src/game/loadgame.cpp
+@@ -46,6 +46,7 @@
+ #include "missile.h"
+ #include "particle.h"
+ #include "pathfinder.h"
++#include "player.h"
+ #include "replay.h"
+ #include "script.h"
+ #include "sound.h"
+@@ -185,6 +186,46 @@ static void PlaceUnits()
+ 	}
+ }
+ 
++/**
++**  Center the view on this player's base: their first town hall (a building
++**  that takes in gold), else the middle of their buildings, else of their
++**  units. Loading leaves the view in the top left corner of the map.
++*/
++static void CenterViewOnPlayerBase()
++{
++	if (ThisPlayer == nullptr || UI.SelectedViewport == nullptr) {
++		return;
++	}
++	const CUnit *hall = nullptr;
++	long buildingX = 0, buildingY = 0, unitX = 0, unitY = 0;
++	int buildings = 0, units = 0;
++	for (const CUnit *unit : ThisPlayer->GetUnits()) {
++		if (unit->Removed || unit->Destroyed || !unit->IsAlive()) {
++			continue;
++		}
++		const PixelPos pos = unit->GetMapPixelPosCenter();
++		if (unit->Type->Building) {
++			if (hall == nullptr && unit->Type->CanStore[GoldCost]) {
++				hall = unit;
++			}
++			buildingX += pos.x;
++			buildingY += pos.y;
++			++buildings;
++		} else {
++			unitX += pos.x;
++			unitY += pos.y;
++			++units;
++		}
++	}
++	if (hall != nullptr) {
++		UI.SelectedViewport->Center(hall->GetMapPixelPosCenter());
++	} else if (buildings) {
++		UI.SelectedViewport->Center(PixelPos(buildingX / buildings, buildingY / buildings));
++	} else if (units) {
++		UI.SelectedViewport->Center(PixelPos(unitX / units, unitY / units));
++	}
++}
++
+ /**
+ **  Load a game to file.
+ **
+@@ -217,6 +258,7 @@ void LoadGame(const fs::path &filename)
+ 	SyncRandSeed = syncrand;
+ 	SyncHash = synchash;
+ 	SelectionChanged();
++	CenterViewOnPlayerBase();
+ }
+ 
+ //@}
 diff --git a/src/include/cursor.h b/src/include/cursor.h
 index c9943b60d..8c69954f3 100644
 --- a/src/include/cursor.h
