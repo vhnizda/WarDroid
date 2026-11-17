@@ -26,6 +26,22 @@ index f44cf547b..0a9b57716 100644
  				} else {
  					DebugPrint("Flushing removed unit\n");
  					// This happens, if building with ALT+SHIFT.
+diff --git a/src/game/game.cpp b/src/game/game.cpp
+index ff4c86a47..88881e897 100644
+--- a/src/game/game.cpp
++++ b/src/game/game.cpp
+@@ -138,7 +138,11 @@ void StartMap(const std::string &filename, bool clean)
+ 
+ 	CreateGame(filename, &Map);
+ 
++#ifdef __ANDROID__
++	UI.StatusLine.Set("WarDroid 2026 - Android Port with enhancements");
++#else
+ 	UI.StatusLine.Set(NameLine);
++#endif
+ 	SetMessage("%s", _("Do it! Do it now!"));
+ 
+ 	//  Play the game.
 diff --git a/src/game/loadgame.cpp b/src/game/loadgame.cpp
 index 3fb3ed6fb..1cf7cdffc 100644
 --- a/src/game/loadgame.cpp
@@ -1062,7 +1078,7 @@ index f4338a07f..c90638225 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..62d2a8e20
+index 000000000..1c3a4f759
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
 @@ -0,0 +1,904 @@
@@ -1141,10 +1157,10 @@ index 000000000..62d2a8e20
 +static constexpr double JoystickScrollSpeed = 480;
 +/// Size of the deselect and group buttons, in screen pixels. Big enough
 +/// for a thumb.
-+static constexpr int ButtonWidth = 77;
-+static constexpr int ButtonHeight = 70;
++static constexpr int ButtonWidth = 58;
++static constexpr int ButtonHeight = 53;
 +/// Gap between neighbouring buttons.
-+static constexpr int ButtonGap = 6;
++static constexpr int ButtonGap = 5;
 +/// Number of group buttons, left of the deselect button.
 +static constexpr int GroupButtons = 4;
 +/// How long a group button is held to save the selection into it.
