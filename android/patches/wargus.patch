@@ -11,6 +11,69 @@ index 689a3674..9ffb2bb2 100644
      menu:add(label, (width - label:getWidth()) / 2, label:getHeight())
      
      local gog, bnet, dos, quit
+diff --git a/scripts/human/ui_pandora.lua b/scripts/human/ui_pandora.lua
+index 74c9af36..bac78137 100644
+--- a/scripts/human/ui_pandora.lua
++++ b/scripts/human/ui_pandora.lua
+@@ -106,12 +106,13 @@ function AddResizedFiller(file, x, y, width, height)
+ end
+ 
+ AddResizedFiller("ui/human/filler-right.png", Video.Width - 16, 0, 16, Video.Height)
+-AddResizedFiller("ui/human/resource.png", 176, 0, Video.Width - 192, 16)
++AddResizedFiller("ui/human/resource.png", 176, 0, Video.Width - 192, 24) -- WarDroid: taller line, its contents drawn at UI.ResourceScale
+ AddResizedFiller("ui/human/statusline.png", 176, Video.Height - 16, Video.Width - 192, 16)
+ AddResizedFiller("ui/human/buttonpanel.png", 0, 336, 176, 144 + Video.Height - 480)
+ 
+-AddFiller("ui/human/menubutton.png", 0, 0)
+-AddFiller("ui/human/minimap.png", 0, 24)
++-- WarDroid: a double height Menu button, with the minimap made smaller to fit
++AddResizedFiller("ui/human/menubutton.png", 0, 0, 176, 48)
++AddResizedFiller("ui/human/minimap.png", 0, 48, 176, 112)
+ 
+ UI.InfoPanel.X = 0
+ UI.InfoPanel.Y = 160
+@@ -227,20 +228,23 @@ UI.ButtonPanel.Y = 336
+ UI.ButtonPanel.AutoCastBorderColorRGB = CColor(0, 0, 252)
+ 
+ UI.MapArea.X = 176
+-UI.MapArea.Y = 16
++UI.MapArea.Y = 24
+ UI.MapArea.EndX = Video.Width - 16 - 1
+ UI.MapArea.EndY = Video.Height - 16 - 1
+ 
+-UI.Minimap.X = 24
+-UI.Minimap.Y = 24 + 2
+-UI.Minimap.W = 128
+-UI.Minimap.H = 128
++UI.Minimap.X = 36
++UI.Minimap.Y = 48 + 2
++UI.Minimap.W = 104
++UI.Minimap.H = 104
+ 
+ UI.StatusLine.TextX = 2 + 176
+ UI.StatusLine.TextY = Video.Height + 2 - 16
+ UI.StatusLine.Width = Video.Width - 16 - 2 - 176
+ UI.StatusLine.Font = Fonts["game"]
+ 
++-- WarDroid: resources drawn 1.5 times their size, to read on a phone
++UI.ResourceScale = 150
++
+ -- gold
+ UI.Resources[1].G = CGraphic:New("ui/gold,wood,oil,mana.png", 14, 14)
+ UI.Resources[1].IconFrame = 0
+@@ -304,8 +308,10 @@ UI.Resources[FreeWorkersCount].IconY = 0
+ UI.Resources[FreeWorkersCount].TextX = Video.Width - 16 - 24 + 18
+ UI.Resources[FreeWorkersCount].TextY = 1
+ 
+-UI.MenuButton.X = 24
+-UI.MenuButton.Y = 2
++UI.MenuButton.X = 8
++UI.MenuButton.Y = 4
++UI.MenuButton.Width = 160
++UI.MenuButton.Height = 40
+ UI.MenuButton.Text = _("Menu (~<F10~>)")
+ UI.MenuButton.Style = FindButtonStyle("main")
+ UI.MenuButton:SetCallback(
 diff --git a/scripts/menus/campaign.lua b/scripts/menus/campaign.lua
 index 216f4d0f..b52e4586 100644
 --- a/scripts/menus/campaign.lua
@@ -175,6 +238,69 @@ index 3fece7e1..93ba9866 100644
    print("\t[server|client]")
    print("\t[dedicated] -- only valid for server, computer becomes an extra player")
    print("\t[online] -- only valid for server, tries to advertise the server on the default metaserver")
+diff --git a/scripts/orc/ui_pandora.lua b/scripts/orc/ui_pandora.lua
+index e5fffa8a..16cb3663 100644
+--- a/scripts/orc/ui_pandora.lua
++++ b/scripts/orc/ui_pandora.lua
+@@ -106,12 +106,13 @@ function AddResizedFiller(file, x, y, width, height)
+ end
+ 
+ AddResizedFiller("ui/orc/filler-right.png", Video.Width - 16, 0, 16, Video.Height)
+-AddResizedFiller("ui/orc/resource.png", 176, 0, Video.Width - 192, 16)
++AddResizedFiller("ui/orc/resource.png", 176, 0, Video.Width - 192, 24) -- WarDroid: taller line, its contents drawn at UI.ResourceScale
+ AddResizedFiller("ui/orc/statusline.png", 176, Video.Height - 16, Video.Width - 192, 16)
+ AddResizedFiller("ui/orc/buttonpanel.png", 0, 336, 176, 144 + Video.Height - 480)
+ 
+-AddFiller("ui/orc/menubutton.png", 0, 0)
+-AddFiller("ui/orc/minimap.png", 0, 24)
++-- WarDroid: a double height Menu button, with the minimap made smaller to fit
++AddResizedFiller("ui/orc/menubutton.png", 0, 0, 176, 48)
++AddResizedFiller("ui/orc/minimap.png", 0, 48, 176, 112)
+ 
+ UI.InfoPanel.X = 0
+ UI.InfoPanel.Y = 160
+@@ -227,20 +228,23 @@ UI.ButtonPanel.Y = 336
+ UI.ButtonPanel.AutoCastBorderColorRGB = CColor(0, 0, 252)
+ 
+ UI.MapArea.X = 176
+-UI.MapArea.Y = 16
++UI.MapArea.Y = 24
+ UI.MapArea.EndX = Video.Width - 16 - 1
+ UI.MapArea.EndY = Video.Height - 16 - 1
+ 
+-UI.Minimap.X = 24
+-UI.Minimap.Y = 24 + 2
+-UI.Minimap.W = 128
+-UI.Minimap.H = 128
++UI.Minimap.X = 36
++UI.Minimap.Y = 48 + 2
++UI.Minimap.W = 104
++UI.Minimap.H = 104
+ 
+ UI.StatusLine.TextX = 2 + 176
+ UI.StatusLine.TextY = Video.Height + 2 - 16
+ UI.StatusLine.Width = Video.Width - 16 - 2 - 176
+ UI.StatusLine.Font = Fonts["game"]
+ 
++-- WarDroid: resources drawn 1.5 times their size, to read on a phone
++UI.ResourceScale = 150
++
+ -- gold
+ UI.Resources[1].G = CGraphic:New("ui/gold,wood,oil,mana.png", 14, 14)
+ UI.Resources[1].IconFrame = 0
+@@ -304,8 +308,10 @@ UI.Resources[FreeWorkersCount].IconY = 0
+ UI.Resources[FreeWorkersCount].TextX = Video.Width - 16 - 24 + 18
+ UI.Resources[FreeWorkersCount].TextY = 1
+ 
+-UI.MenuButton.X = 24
+-UI.MenuButton.Y = 2
++UI.MenuButton.X = 8
++UI.MenuButton.Y = 4
++UI.MenuButton.Width = 160
++UI.MenuButton.Height = 40
+ UI.MenuButton.Text = _("Menu (~<F10~>)")
+ UI.MenuButton.Style = FindButtonStyle("main-orc")
+ UI.MenuButton:SetCallback(
 diff --git a/scripts/singleplayer.lua b/scripts/singleplayer.lua
 index e21fd3fe..5d52798a 100644
 --- a/scripts/singleplayer.lua
@@ -189,7 +315,7 @@ index e21fd3fe..5d52798a 100644
    print("\t[reveal] -- reveal the map")
    print("\t[repeat=cnt] -- repeat the game cnt times")
 diff --git a/scripts/stratagus.lua b/scripts/stratagus.lua
-index 4811fa6b..770cbebe 100644
+index 4811fa6b..c563a719 100644
 --- a/scripts/stratagus.lua
 +++ b/scripts/stratagus.lua
 @@ -72,11 +72,13 @@ wargus = {}
@@ -209,7 +335,17 @@ index 4811fa6b..770cbebe 100644
  wargus.Licence = "GPL v2+"
  
  
-@@ -392,7 +394,7 @@ local defaultPreferences = {
+@@ -140,6 +142,9 @@ SetFullGameName(wargus.Name)
+ SetMenuRace("orc")
+ 
+ Preference.ShowSightRange = false
++-- WarDroid: no "Stratagus", game cycle and player list in the panel when
++-- nothing is selected; that panel stays empty, as in the original game.
++Preference.ShowNoSelectionStats = false
+ Preference.ShowAttackRange = false
+ Preference.ShowReactionRange = false
+ Preference.IconsShift = true
+@@ -392,7 +397,7 @@ local defaultPreferences = {
    HardwareCursor = false,
  	CampaignBestScores = {},
  	CampaignProgress = {},
@@ -218,7 +354,7 @@ index 4811fa6b..770cbebe 100644
  	DoubleClickDelayInMs = 300,     --  For the wanted double-click delay (in ms).
  	EffectsEnabled = true,
  	EffectsVolume = 128,
-@@ -405,7 +407,7 @@ local defaultPreferences = {
+@@ -405,7 +410,7 @@ local defaultPreferences = {
  	GrabMouse = false,              --  Enable/disable grabbing the mouse.
  	GroupKeys = "0123456789`",
  	HoldClickDelayInMs = 1000,      --  For the wanted hold-click delay (in ms).
@@ -227,7 +363,7 @@ index 4811fa6b..770cbebe 100644
  	KeyScrollSpeed = 4,
  	LastDifficulty = 2,
  	LeaveStopScrolling = true,      --  Enable/disable stopping scrolling when mouse leave.
-@@ -417,7 +419,7 @@ local defaultPreferences = {
+@@ -417,7 +422,7 @@ local defaultPreferences = {
  	MusicEnabled = true,
  	MusicVolume = 128,
  	PauseOnLeave = true,

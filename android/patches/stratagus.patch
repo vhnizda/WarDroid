@@ -133,7 +133,7 @@ index c9943b60d..8c69954f3 100644
  /*----------------------------------------------------------------------------
  --  Functions
 diff --git a/src/include/interface.h b/src/include/interface.h
-index 1a210eb57..660daebb1 100644
+index 1a210eb57..b17920d0c 100644
 --- a/src/include/interface.h
 +++ b/src/include/interface.h
 @@ -43,6 +43,7 @@
@@ -144,7 +144,7 @@ index 1a210eb57..660daebb1 100644
  #include <optional>
  #include <vector>
  
-@@ -396,6 +397,26 @@ extern void UpdateTimer();
+@@ -396,6 +397,28 @@ extern void UpdateTimer();
  extern void UpdateStatusLineForButton(const ButtonAction &button);
  /// Draw the Pie Menu
  extern void DrawPieMenu();
@@ -162,6 +162,8 @@ index 1a210eb57..660daebb1 100644
 +extern void TouchControlsFinger(const SDL_TouchFingerEvent &event);
 +/// Whether a pinch owns the touches
 +extern bool TouchControlsPinching();
++/// The area around the joystick, where touches never reach the map
++extern bool TouchControlsDeadZone(const PixelPos &screenPos);
 +/// A tap on the map from a finger other than the pointer's
 +extern void MapTapAt(const PixelPos &screenPos);
 +/// The pointer's finger is holding a building to place it on release
@@ -192,6 +194,27 @@ index 4df2bce7f..0386fc061 100644
  /// Get local hostname
  extern std::string NetGetHostname();
  
+diff --git a/src/include/ui.h b/src/include/ui.h
+index ad4555d6f..dfe212b9b 100644
+--- a/src/include/ui.h
++++ b/src/include/ui.h
+@@ -135,6 +135,8 @@ class CUIButton
+ 	//bool Clicked = false;       /// whether the button is currently clicked or not
+ 	//bool HotKeyPressed = false; /// whether the buttons hotkey is currently pressed or not
+ 	// NEW CODE END
++	int Width = 0;                  /// drawn and clickable width, 0 for the style's
++	int Height = 0;                 /// drawn and clickable height, 0 for the style's
+ 	std::string Text;               /// button text
+ 	ButtonStyle *Style = nullptr;          /// button style
+ 	LuaActionListener *Callback = nullptr; /// callback function
+@@ -446,6 +448,7 @@ class CUserInterface
+ 	// Menu buttons
+ 	CUIButton MenuButton;               /// menu button
+ 	CUIButton NetworkMenuButton;        /// network menu button
++	int ResourceScale = 100;            /// size of the resource line, in percent
+ 	CUIButton NetworkDiplomacyButton;   /// network diplomacy button
+ 
+ 	// Used defined buttons
 diff --git a/src/include/unittype.h b/src/include/unittype.h
 index 1389df5e5..6f6677b5c 100644
 --- a/src/include/unittype.h
@@ -713,6 +736,27 @@ index ec8b15d03..c7b5d82d1 100644
  
  	// FIXME: peon/peasant with gold/wood & co are considered from
  	//   different type... idem for tankers
+diff --git a/src/tolua/ui.pkg b/src/tolua/ui.pkg
+index 56103abaa..013a4601d 100644
+--- a/src/tolua/ui.pkg
++++ b/src/tolua/ui.pkg
+@@ -21,6 +21,8 @@ class CUIButton
+ 
+ 	int X;
+ 	int Y;
++	int Width;
++	int Height;
+ 	string Text;
+ 	ButtonStyle *Style;
+ 	LuaActionListener *Callback;
+@@ -191,6 +193,7 @@ class CUserInterface
+ 
+ 	CUIButton MenuButton;
+ 	CUIButton NetworkMenuButton;
++	int ResourceScale;
+ 	CUIButton NetworkDiplomacyButton;
+ 
+ 	vector<CUIUserButton> UserButtons;
 diff --git a/src/ui/botpanel.cpp b/src/ui/botpanel.cpp
 index d739471b8..5f073a1df 100644
 --- a/src/ui/botpanel.cpp
@@ -729,8 +773,165 @@ index d739471b8..5f073a1df 100644
  	if (button.Popup.empty()) {
  		return;
  	}
+diff --git a/src/ui/mainscr.cpp b/src/ui/mainscr.cpp
+index 16ba28641..20c331529 100644
+--- a/src/ui/mainscr.cpp
++++ b/src/ui/mainscr.cpp
+@@ -64,6 +64,7 @@
+ #include "../ai/ai_local.h"
+ #endif
+ 
++#include <functional>
+ #include <sstream>
+ #include <variant>
+ 
+@@ -71,17 +72,74 @@
+ --  UI BUTTONS
+ ----------------------------------------------------------------------------*/
+ 
++/**
++**  Run draw() with an offscreen surface of w x h as the screen, cleared to
++**  see-through, and return that surface for blitting, scaled, to the screen. The
++**  surface is kept in buffer between calls.
++*/
++static SDL_Surface *DrawOffscreen(SDL_Surface *&buffer, int w, int h, const std::function<void()> &draw)
++{
++	if (!buffer || buffer->w != w || buffer->h != h
++	    || buffer->format->format != TheScreen->format->format) {
++		if (buffer) {
++			SDL_FreeSurface(buffer);
++		}
++		buffer = SDL_CreateRGBSurface(0, w, h, 32, TheScreen->format->Rmask,
++		                              TheScreen->format->Gmask, TheScreen->format->Bmask, 0);
++		if (!buffer) {
++			return nullptr;
++		}
++	}
++	const Uint32 seeThrough = SDL_MapRGB(buffer->format, 255, 0, 255);
++	SDL_FillRect(buffer, nullptr, seeThrough);
++	SDL_SetColorKey(buffer, SDL_TRUE, seeThrough);
++
++	// The line drawing code takes the screen's width as its pitch.
++	SDL_Surface *screen = TheScreen;
++	const int videoWidth = Video.Width;
++	const int videoHeight = Video.Height;
++	TheScreen = buffer;
++	Video.Width = w;
++	Video.Height = h;
++	PushClipping();
++	SetClipping(0, 0, w - 1, h - 1);
++	draw();
++	PopClipping();
++	TheScreen = screen;
++	Video.Width = videoWidth;
++	Video.Height = videoHeight;
++	return buffer;
++}
++
+ static void DrawMenuButtonArea_noNetwork()
+ {
+-	if (UI.MenuButton.X != -1) {
+-		DrawUIButton(UI.MenuButton.Style,
+-					 (ButtonAreaUnderCursor == ButtonArea::Menu
+-					  && ButtonUnderCursor == ButtonUnderMenu ? MI_FLAGS_ACTIVE : 0) |
+-					 (GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0),
+-					 // (UI.MenuButton.Clicked ? MI_FLAGS_CLICKED : 0),
+-					 UI.MenuButton.X, UI.MenuButton.Y,
+-					 UI.MenuButton.Text);
++	if (UI.MenuButton.X == -1) {
++		return;
+ 	}
++	const unsigned flags = (ButtonAreaUnderCursor == ButtonArea::Menu
++	                        && ButtonUnderCursor == ButtonUnderMenu ? MI_FLAGS_ACTIVE : 0)
++	                       | (GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0);
++	ButtonStyle *style = UI.MenuButton.Style;
++	if (UI.MenuButton.Width <= 0 || UI.MenuButton.Height <= 0) {
++		DrawUIButton(style, flags, UI.MenuButton.X, UI.MenuButton.Y, UI.MenuButton.Text);
++		return;
++	}
++	// A bigger button: its picture stretched, and its text in the large font.
++	static SDL_Surface *buffer = nullptr;
++	SDL_Surface *button = DrawOffscreen(buffer, style->Width, style->Height,
++	                                    [&]() { DrawUIButton(style, flags, 0, 0, ""); });
++	if (button) {
++		SDL_Rect dst = {UI.MenuButton.X, UI.MenuButton.Y, UI.MenuButton.Width, UI.MenuButton.Height};
++		SDL_BlitScaled(button, nullptr, TheScreen, &dst);
++	}
++	const CFont *font = CFont::Get("large");
++	const bool lit = (flags & (MI_FLAGS_ACTIVE | MI_FLAGS_CLICKED)) != 0;
++	const CLabel label(font ? *font : GetGameFont(), lit ? style->TextReverseColor : style->TextNormalColor,
++	                   style->TextReverseColor);
++	const int shift = GameMenuButtonClicked ? 1 : 0;
++	label.DrawCentered(UI.MenuButton.X + UI.MenuButton.Width / 2 + shift,
++	                   UI.MenuButton.Y + (UI.MenuButton.Height - label.Height()) / 2 + shift,
++	                   UI.MenuButton.Text);
+ }
+ 
+ static void DrawMenuButtonArea_Network()
+@@ -577,7 +635,7 @@ static void DrawUnitInfo(CUnit &unit)
+ **
+ **  @todo FIXME : make DrawResources more configurable (format, font).
+ */
+-void DrawResources()
++static void DrawResourcesLine()
+ {
+ 	CLabel label(GetGameFont());
+ 
+@@ -642,6 +700,52 @@ void DrawResources()
+ 	}
+ }
+ 
++/**
++**  Draw the player resources in the top line, enlarged by UI.ResourceScale.
++**  Resource positions are set for the line at its normal size. Those on the
++**  left half of the screen grow rightwards from the line's left end, those
++**  on the right half grow leftwards from the right edge of the screen.
++*/
++void DrawResources()
++{
++	const int scale = UI.ResourceScale;
++	if (scale <= 0 || scale == 100) {
++		DrawResourcesLine();
++		return;
++	}
++	const int width = Video.Width;
++	const int scaledHeight = UI.MapArea.Y;
++	const int height = std::max(1, scaledHeight * 100 / scale);
++	static SDL_Surface *buffer = nullptr;
++	SDL_Surface *line = DrawOffscreen(buffer, width, height, DrawResourcesLine);
++	if (!line) {
++		return;
++	}
++	const int left = UI.MapArea.X;
++	int split = width;
++	for (int i = 0; i <= FreeWorkersCount; ++i) {
++		const int x = UI.Resources[i].IconX;
++		if (x >= width / 2 && x - 2 < split) {
++			split = x - 2;
++		}
++	}
++	const int leftWidth = split - left;
++	const int rightWidth = width - split;
++	SDL_Rect clip = {left, 0, width - left, scaledHeight};
++	SDL_SetClipRect(TheScreen, &clip);
++	if (leftWidth > 0) {
++		SDL_Rect src = {left, 0, leftWidth, height};
++		SDL_Rect dst = {left, 0, leftWidth * scale / 100, scaledHeight};
++		SDL_BlitScaled(line, &src, TheScreen, &dst);
++	}
++	if (rightWidth > 0) {
++		SDL_Rect src = {split, 0, rightWidth, height};
++		SDL_Rect dst = {width - rightWidth * scale / 100, 0, rightWidth * scale / 100, scaledHeight};
++		SDL_BlitScaled(line, &src, TheScreen, &dst);
++	}
++	SDL_SetClipRect(TheScreen, nullptr);
++}
++
+ /*----------------------------------------------------------------------------
+ --  MESSAGE
+ ----------------------------------------------------------------------------*/
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..c90638225 100644
+index f4338a07f..bde2d28f3 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
 @@ -707,6 +707,133 @@ void DoRightButton(const PixelPos &mapPixelPos)
@@ -867,7 +1068,20 @@ index f4338a07f..c90638225 100644
  /**
  **  Check if the mouse is on a button
  **
-@@ -1000,6 +1127,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
+@@ -718,8 +845,10 @@ bool CUIButton::Contains(const PixelPos &screenPos) const
+ {
+ 	Assert(this->Style);
+ 
+-	return this->X <= screenPos.x && screenPos.x < this->X + this->Style->Width
+-		   && this->Y <= screenPos.y && screenPos.y < this->Y + this->Style->Height;
++	const int width = this->Width > 0 ? this->Width : this->Style->Width;
++	const int height = this->Height > 0 ? this->Height : this->Style->Height;
++	return this->X <= screenPos.x && screenPos.x < this->X + width
++		   && this->Y <= screenPos.y && screenPos.y < this->Y + height;
+ }
+ 
+ /**
+@@ -1000,6 +1129,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
  		ActionDraw();
  		return;
  	}
@@ -877,7 +1091,7 @@ index f4338a07f..c90638225 100644
  
  	OldCursorOn = CursorOn;
  	//  Selecting units.
-@@ -1686,6 +1816,57 @@ static void UISelectStateButtonDown(unsigned)
+@@ -1686,6 +1818,57 @@ static void UISelectStateButtonDown(unsigned)
  }
  
  
@@ -935,7 +1149,7 @@ index f4338a07f..c90638225 100644
  static void UIHandleButtonDown_OnMap(unsigned button)
  {
  	Assert(UI.MouseViewport);
-@@ -1699,27 +1880,16 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+@@ -1699,27 +1882,16 @@ static void UIHandleButtonDown_OnMap(unsigned button)
  	if (CursorBuilding) {
  		// Possible Selected[0] was removed from map
  		// need to make sure there is a unit to build
@@ -971,7 +1185,7 @@ index f4338a07f..c90638225 100644
  		} else {
  			CancelBuildingMode();
  		}
-@@ -1754,6 +1924,8 @@ static void UIHandleButtonDown_OnMap(unsigned button)
+@@ -1754,6 +1926,8 @@ static void UIHandleButtonDown_OnMap(unsigned button)
  			DoRightButton(mapPixelPos);
  		}
  	} else if (MouseButtons & LeftButton) { // enter select mode
@@ -980,7 +1194,7 @@ index f4338a07f..c90638225 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -1914,6 +2086,15 @@ void UIHandleButtonDown(unsigned button)
+@@ -1914,6 +2088,15 @@ void UIHandleButtonDown(unsigned button)
  		ActionDraw();
  		return;
  	}
@@ -996,7 +1210,7 @@ index f4338a07f..c90638225 100644
  
  	static bool OldShowSightRange;
  	static bool OldShowReactionRange;
-@@ -1924,7 +2105,8 @@ void UIHandleButtonDown(unsigned button)
+@@ -1924,7 +2107,8 @@ void UIHandleButtonDown(unsigned button)
  	// Reset the ShowNameDelay counters
  	ShowNameDelay = ShowNameTime = GameCycle;
  
@@ -1006,7 +1220,7 @@ index f4338a07f..c90638225 100644
  		if (!OldValid) {
  			OldShowSightRange = Preference.ShowSightRange;
  			OldShowAttackRange = Preference.ShowAttackRange;
-@@ -1984,6 +2166,20 @@ void UIHandleButtonDown(unsigned button)
+@@ -1984,6 +2168,21 @@ void UIHandleButtonDown(unsigned button)
  */
  void UIHandleButtonUp(unsigned button)
  {
@@ -1019,7 +1233,8 @@ index f4338a07f..c90638225 100644
 +		TouchBuildPending = false;
 +		HandleMouseOn(CursorScreenPos);
 +		if (CursorBuilding && !TouchControlsPinching() && !Selected.empty() && Selected[0]
-+		    && CursorOn == ECursorOn::Map && UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {
++		    && CursorOn == ECursorOn::Map && UI.MouseViewport->IsInsideMapArea(CursorScreenPos)
++		    && !TouchControlsDeadZone(CursorScreenPos)) {
 +			PlaceCursorBuilding();
 +		}
 +		return;
@@ -1027,7 +1242,7 @@ index f4338a07f..c90638225 100644
  	//
  	//  Move map.
  	//
-@@ -2084,10 +2280,9 @@ void UIHandleButtonUp(unsigned button)
+@@ -2084,10 +2283,9 @@ void UIHandleButtonUp(unsigned button)
  	if (CursorState == CursorStates::Rectangle && !(MouseButtons & LeftButton)) { // leave select mode
  		int num = 0;
  		//
@@ -1040,7 +1255,7 @@ index f4338a07f..c90638225 100644
  			PixelPos pos0 = CursorStartMapPos;
  			const PixelPos cursorMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  			PixelPos pos1 = cursorMapPos;
-@@ -2128,7 +2323,13 @@ void UIHandleButtonUp(unsigned button)
+@@ -2128,7 +2326,13 @@ void UIHandleButtonUp(unsigned button)
  
  				unit = UnitOnScreen(cursorMapPos.x, cursorMapPos.y);
  			}
@@ -1055,7 +1270,7 @@ index f4338a07f..c90638225 100644
  				// FIXME: Not nice coded, button number hardcoded!
  				if ((KeyModifiers & ModifierControl)
  					|| (button & (1 << MouseDoubleShift))) {
-@@ -2159,8 +2360,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -2159,8 +2363,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
@@ -1078,10 +1293,10 @@ index f4338a07f..c90638225 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..1c3a4f759
+index 000000000..fb1a3fe12
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,904 @@
+@@ -0,0 +1,924 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -1256,6 +1471,20 @@ index 000000000..1c3a4f759
 +{
 +	const PixelDiff d = screenPos - JoystickCenter();
 +	return d.x * d.x + d.y * d.y <= JoystickRadius * JoystickRadius;
++}
++
++/// The square around the joystick, out to the map's edges: touches there
++/// never reach the map, so a thumb near the stick can't select or order.
++static bool IsInJoystickZone(const PixelPos &screenPos)
++{
++	const PixelPos center = JoystickCenter();
++	return screenPos.x >= UI.MapArea.X && screenPos.x <= center.x + JoystickRadius + ControlMargin
++	       && screenPos.y >= center.y - JoystickRadius - ControlMargin && screenPos.y <= UI.MapArea.EndY;
++}
++
++bool TouchControlsDeadZone(const PixelPos &screenPos)
++{
++	return ControlsShown() && IsInJoystickZone(screenPos);
 +}
 +
 +static bool IsOnDeselect(const PixelPos &screenPos)
@@ -1619,7 +1848,7 @@ index 000000000..1c3a4f759
 +	if ((JoystickHeld && !JoystickByFinger) || PressedGroup) {
 +		return true;
 +	}
-+	if (JoystickByFinger && IsOnJoystick(screenPos)) {
++	if (JoystickByFinger && IsInJoystickZone(screenPos)) {
 +		PointerPressIgnored = true;
 +		return true;
 +	}
@@ -1640,6 +1869,11 @@ index 000000000..1c3a4f759
 +		LastScrollTicks = SDL_GetTicks();
 +		ScrollRemainderX = ScrollRemainderY = 0;
 +		MoveKnob(screenPos);
++		return true;
++	}
++	if (IsInJoystickZone(screenPos)) {
++		// Beside the stick: ignored, along with its moves and release.
++		PointerPressIgnored = true;
 +		return true;
 +	}
 +	return false;
@@ -1831,7 +2065,7 @@ index 000000000..1c3a4f759
 +static bool IsOnMap(const PixelPrecise &pos)
 +{
 +	const PixelPos screenPos(static_cast<int>(pos.x), static_cast<int>(pos.y));
-+	return UI.SelectedViewport->Contains(screenPos) && !IsOnJoystick(screenPos)
++	return UI.SelectedViewport->Contains(screenPos) && !IsInJoystickZone(screenPos)
 +	       && !GroupAt(screenPos) && !(DeselectShown() && IsOnDeselect(screenPos));
 +}
 +
@@ -1894,7 +2128,7 @@ index 000000000..1c3a4f759
 +		SelectionChanged();
 +	} else if (const int group = GroupAt(screenPos)) {
 +		RecallGroup(group);
-+	} else if (!IsOnJoystick(screenPos)) {
++	} else if (!IsInJoystickZone(screenPos)) {
 +		MapTapAt(screenPos);
 +	}
 +}
@@ -1930,6 +2164,7 @@ index 000000000..1c3a4f759
 +			}
 +			Fingers[event.fingerId] = pos;
 +			if (!Pinching && Fingers.size() == 2 && ControlsShown() && !JoystickHeld && !PressedGroup
++			    && !CursorBuilding
 +			    && IsOnMap(Fingers.begin()->second) && IsOnMap(std::next(Fingers.begin())->second)) {
 +				StartPinch();
 +			}
@@ -2171,7 +2406,7 @@ index e25044acd..3519abe7c 100644
  	if (!Preference.HardwareCursor) {
  		const PixelPos pos = CursorScreenPos - GameCursor->HotPos;
 diff --git a/src/video/sdl.cpp b/src/video/sdl.cpp
-index 18af13249..5d84545ce 100644
+index 18af13249..0b91b07a5 100644
 --- a/src/video/sdl.cpp
 +++ b/src/video/sdl.cpp
 @@ -36,7 +36,9 @@
@@ -2199,7 +2434,18 @@ index 18af13249..5d84545ce 100644
  
  		// Clean up on exit
  		atexit(CleanUpVideoSdl);
-@@ -428,7 +437,8 @@ void InitVideoSdl()
+@@ -415,6 +424,10 @@ void InitVideoSdl()
+ 	}
+ 	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+ 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
++#ifdef __ANDROID__
++	// Deliver the Back button as a key instead of closing the app.
++	SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
++#endif
+ 	int rendererFlags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE;
+ 	if (!Parameters::Instance.benchmark) {
+ 		rendererFlags |= SDL_RENDERER_PRESENTVSYNC;
+@@ -428,7 +441,8 @@ void InitVideoSdl()
  		if (strlen(rendererInfo.name) == 0) {
  			dummyRenderer = true;
  		}
@@ -2209,7 +2455,24 @@ index 18af13249..5d84545ce 100644
  			LoadShaderExtensions();
  		}
  	}
-@@ -572,7 +582,19 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+@@ -567,12 +581,36 @@ static bool isTextInput(int key) {
+ **  @param callbacks  Callback structure for events.
+ **  @param event      SDL event structure pointer.
+ */
++/**
++**  Android's Back button opens the game menu during a game, as F10 does,
++**  and backs out of menus, as Escape does.
++*/
++static SDL_Keycode BackButtonKey(SDL_Keycode key, const EventCallback &callbacks)
++{
++	if (key != SDLK_AC_BACK) {
++		return key;
++	}
++	return &callbacks == &GameCallbacks ? SDLK_F10 : SDLK_ESCAPE;
++}
++
+ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+ {
  	unsigned int keysym = 0;
  
  	switch (event.type) {
@@ -2229,7 +2492,7 @@ index 18af13249..5d84545ce 100644
  			event.button.y = static_cast<int>(std::floor(event.button.y / Video.VerticalPixelSize + 0.5));
  			InputMouseButtonPress(callbacks, SDL_GetTicks(), event.button.button);
  			break;
-@@ -583,6 +605,14 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+@@ -583,6 +621,14 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
  			break;
  
  		case SDL_MOUSEMOTION:
@@ -2244,6 +2507,22 @@ index 18af13249..5d84545ce 100644
  			event.motion.y = static_cast<int>(std::floor(event.button.y / Video.VerticalPixelSize + 0.5));
  			InputMouseMove(callbacks, SDL_GetTicks(), event.motion.x, event.motion.y);
  			break;
+@@ -680,6 +726,7 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+ 
+ 		case SDL_KEYDOWN:
+ 			keysym = event.key.keysym.sym;
++			keysym = BackButtonKey(keysym, callbacks);
+ 			if (!isTextInput(keysym)) {
+ 				// only report non-printing keys here, the characters will be reported with the textinput event
+ 				InputKeyButtonPress(callbacks, SDL_GetTicks(), keysym, keysym < 128 ? keysym : 0);
+@@ -688,6 +735,7 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
+ 
+ 		case SDL_KEYUP:
+ 			keysym = event.key.keysym.sym;
++			keysym = BackButtonKey(keysym, callbacks);
+ 			if (!isTextInput(keysym)) {
+ 				// only report non-printing keys here, the characters will be reported with the textinput event
+ 				InputKeyButtonRelease(callbacks, SDL_GetTicks(), keysym, keysym < 128 ? keysym : 0);
 diff --git a/src/video/shaders.cpp b/src/video/shaders.cpp
 index 61b52a3f2..0fc073414 100644
 --- a/src/video/shaders.cpp
