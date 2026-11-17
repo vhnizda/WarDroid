@@ -133,7 +133,7 @@ index c9943b60d..8c69954f3 100644
  /*----------------------------------------------------------------------------
  --  Functions
 diff --git a/src/include/interface.h b/src/include/interface.h
-index 1a210eb57..b17920d0c 100644
+index 1a210eb57..b4481e84e 100644
 --- a/src/include/interface.h
 +++ b/src/include/interface.h
 @@ -43,6 +43,7 @@
@@ -144,7 +144,7 @@ index 1a210eb57..b17920d0c 100644
  #include <optional>
  #include <vector>
  
-@@ -396,6 +397,28 @@ extern void UpdateTimer();
+@@ -396,6 +397,31 @@ extern void UpdateTimer();
  extern void UpdateStatusLineForButton(const ButtonAction &button);
  /// Draw the Pie Menu
  extern void DrawPieMenu();
@@ -164,6 +164,9 @@ index 1a210eb57..b17920d0c 100644
 +extern bool TouchControlsPinching();
 +/// The area around the joystick, where touches never reach the map
 +extern bool TouchControlsDeadZone(const PixelPos &screenPos);
++/// A held building was let go of over a control: on the X it cancels the
++/// building, on a group button nothing happens. True if it was handled.
++extern bool TouchControlsBuildingDrop(const PixelPos &screenPos);
 +/// A tap on the map from a finger other than the pointer's
 +extern void MapTapAt(const PixelPos &screenPos);
 +/// The pointer's finger is holding a building to place it on release
@@ -972,7 +975,7 @@ index 16ba28641..20c331529 100644
  --  MESSAGE
  ----------------------------------------------------------------------------*/
 diff --git a/src/ui/mouse.cpp b/src/ui/mouse.cpp
-index f4338a07f..bde2d28f3 100644
+index f4338a07f..c96538826 100644
 --- a/src/ui/mouse.cpp
 +++ b/src/ui/mouse.cpp
 @@ -707,6 +707,133 @@ void DoRightButton(const PixelPos &mapPixelPos)
@@ -1235,13 +1238,21 @@ index f4338a07f..bde2d28f3 100644
  		CursorStartScreenPos = CursorScreenPos;
  		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  		GameCursor = UI.Cross.Cursor;
-@@ -1914,6 +2088,15 @@ void UIHandleButtonDown(unsigned button)
+@@ -1914,6 +2088,23 @@ void UIHandleButtonDown(unsigned button)
  		ActionDraw();
  		return;
  	}
 +	// Holding two fingers still to pinch sends a long press.
 +	if (TouchControlsPinching()) {
 +		return;
++	}
++	// A finger holding a building keeps sending presses while held, which
++	// mustn't press a control it has moved onto, such as the X.
++	if (TouchBuildPending) {
++		if (CursorBuilding && (MouseButtons & LeftButton)) {
++			return;
++		}
++		TouchBuildPending = false; // building mode ended some other way
 +	}
 +	// Before the long press check: holding a control must not show ranges.
 +	if (CursorState != CursorStates::Rectangle && (MouseButtons & LeftButton)
@@ -1251,7 +1262,7 @@ index f4338a07f..bde2d28f3 100644
  
  	static bool OldShowSightRange;
  	static bool OldShowReactionRange;
-@@ -1924,7 +2107,8 @@ void UIHandleButtonDown(unsigned button)
+@@ -1924,7 +2115,8 @@ void UIHandleButtonDown(unsigned button)
  	// Reset the ShowNameDelay counters
  	ShowNameDelay = ShowNameTime = GameCycle;
  
@@ -1261,7 +1272,7 @@ index f4338a07f..bde2d28f3 100644
  		if (!OldValid) {
  			OldShowSightRange = Preference.ShowSightRange;
  			OldShowAttackRange = Preference.ShowAttackRange;
-@@ -1984,6 +2168,21 @@ void UIHandleButtonDown(unsigned button)
+@@ -1984,6 +2176,24 @@ void UIHandleButtonDown(unsigned button)
  */
  void UIHandleButtonUp(unsigned button)
  {
@@ -1272,6 +1283,9 @@ index f4338a07f..bde2d28f3 100644
 +	// slid off the map or a pinch took over.
 +	if ((1 << button) == LeftButton && TouchBuildPending) {
 +		TouchBuildPending = false;
++		if (TouchControlsBuildingDrop(CursorScreenPos)) {
++			return;
++		}
 +		HandleMouseOn(CursorScreenPos);
 +		if (CursorBuilding && !TouchControlsPinching() && !Selected.empty() && Selected[0]
 +		    && CursorOn == ECursorOn::Map && UI.MouseViewport->IsInsideMapArea(CursorScreenPos)
@@ -1283,7 +1297,7 @@ index f4338a07f..bde2d28f3 100644
  	//
  	//  Move map.
  	//
-@@ -2084,10 +2283,9 @@ void UIHandleButtonUp(unsigned button)
+@@ -2084,10 +2294,9 @@ void UIHandleButtonUp(unsigned button)
  	if (CursorState == CursorStates::Rectangle && !(MouseButtons & LeftButton)) { // leave select mode
  		int num = 0;
  		//
@@ -1296,7 +1310,7 @@ index f4338a07f..bde2d28f3 100644
  			PixelPos pos0 = CursorStartMapPos;
  			const PixelPos cursorMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
  			PixelPos pos1 = cursorMapPos;
-@@ -2128,7 +2326,13 @@ void UIHandleButtonUp(unsigned button)
+@@ -2128,7 +2337,13 @@ void UIHandleButtonUp(unsigned button)
  
  				unit = UnitOnScreen(cursorMapPos.x, cursorMapPos.y);
  			}
@@ -1311,7 +1325,7 @@ index f4338a07f..bde2d28f3 100644
  				// FIXME: Not nice coded, button number hardcoded!
  				if ((KeyModifiers & ModifierControl)
  					|| (button & (1 << MouseDoubleShift))) {
-@@ -2159,8 +2363,18 @@ void UIHandleButtonUp(unsigned button)
+@@ -2159,8 +2374,18 @@ void UIHandleButtonUp(unsigned button)
  					SelectSingleUnit(*unit);
  					num = 1;
  				}
@@ -1334,10 +1348,10 @@ index f4338a07f..bde2d28f3 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..70eaaafe8
+index 000000000..dcdccb0df
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,952 @@
+@@ -0,0 +1,998 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -1528,6 +1542,35 @@ index 000000000..70eaaafe8
 +bool TouchControlsDeadZone(const PixelPos &screenPos)
 +{
 +	return ControlsShown() && IsInJoystickZone(screenPos);
++}
++
++static bool IsOnDeselect(const PixelPos &screenPos);
++
++/// A finger is holding a building to place.
++static bool HoldingBuilding()
++{
++	return CursorBuilding && (TouchBuildHeld() || BuildingFingerHeld) && ControlsShown();
++}
++
++/// Over the deselect or a group button, where a held building isn't placed.
++static bool IsOnBottomButtons(const PixelPos &screenPos)
++{
++	return GroupAt(screenPos) || (DeselectShown() && IsOnDeselect(screenPos));
++}
++
++bool TouchControlsBuildingDrop(const PixelPos &screenPos)
++{
++	if (!ControlsShown()) {
++		return false;
++	}
++	if (DeselectShown() && IsOnDeselect(screenPos)) {
++		// Dropped on the X: cancel, as tapping it does.
++		CancelBuildingMode();
++		GameCursor = UI.Point.Cursor;
++		CursorState = CursorStates::Point;
++		return true;
++	}
++	return GroupAt(screenPos) != 0;
 +}
 +
 +static bool IsOnDeselect(const PixelPos &screenPos)
@@ -1845,13 +1888,14 @@ index 000000000..70eaaafe8
 +}
 +
 +/// The blue button with a gold X on it.
-+static void DrawDeselectButton(const PixelPos &topLeft)
++static void DrawDeselectButton(const PixelPos &topLeft, bool pressed = false)
 +{
-+	DrawButtonBox(BlueButtonFile, topLeft, DeselectWidth, DeselectHeight);
++	DrawButtonBox(pressed ? BlueButtonPressedFile : BlueButtonFile, topLeft, DeselectWidth, DeselectHeight);
 +
 +	// Grown with the button, 30% bigger than the group buttons' numbers.
 +	const int size = 25;
-+	const PixelPos a(topLeft.x + (DeselectWidth - size) / 2, topLeft.y + (DeselectHeight - size) / 2);
++	const int shift = pressed ? 1 : 0;
++	const PixelPos a(topLeft.x + (DeselectWidth - size) / 2 + shift, topLeft.y + (DeselectHeight - size) / 2 + shift);
 +	const PixelPos b = a + PixelDiff(size, size);
 +	const Uint32 shadow = Rgb(40, 24, 0);
 +	const Uint32 gold = Rgb(252, 204, 52);
@@ -1902,7 +1946,18 @@ index 000000000..70eaaafe8
 +		DrawGroupButton(group);
 +	}
 +	if (DeselectShown()) {
-+		DrawDeselectButton(DeselectTopLeft());
++		const PixelPos topLeft = DeselectTopLeft();
++		const bool holding = HoldingBuilding();
++		DrawDeselectButton(topLeft, holding && IsOnDeselect(BuildingCursorScreenPos()));
++		if (holding) {
++			// A gold frame: drop the building here to cancel it.
++			const Uint32 gold = Rgb(252, 204, 52);
++			const Uint32 dark = Rgb(120, 80, 0);
++			for (int i = 2; i <= 4; ++i) {
++				Video.DrawRectangleClip(i == 4 ? dark : gold, topLeft.x - i, topLeft.y - i,
++				                        DeselectWidth + 2 * i, DeselectHeight + 2 * i);
++			}
++		}
 +	}
 +}
 +
@@ -2031,6 +2086,11 @@ index 000000000..70eaaafe8
 +	}
 +	CViewport &vp = *UI.SelectedViewport;
 +	const PixelPos finger = BuildingCursorScreenPos();
++	if (IsOnBottomButtons(finger)) {
++		// Heading for the X or a group button, not for the edge.
++		EdgeRemainderX = EdgeRemainderY = 0;
++		return;
++	}
 +	const PixelPos building = vp.TilePosToScreen_TopLeft(BuildingCursorTilePos());
 +	const PixelPos topLeft = vp.GetTopLeftPos();
 +	const PixelPos bottomRight = vp.GetBottomRightPos();
@@ -2256,7 +2316,7 @@ index 000000000..70eaaafe8
 +			}
 +			if (BuildingFingerHeld && event.fingerId == BuildingFingerId) {
 +				BuildingFingerPos = screenPos;
-+				if (IsOnMap(pos) && ControlsShown()) {
++				if (!TouchControlsBuildingDrop(screenPos) && IsOnMap(pos) && ControlsShown()) {
 +					TouchPlaceBuilding();
 +				}
 +				BuildingFingerHeld = false;
