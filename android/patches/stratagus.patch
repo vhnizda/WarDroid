@@ -1293,10 +1293,10 @@ index f4338a07f..bde2d28f3 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..deeccc7d5
+index 000000000..70eaaafe8
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,927 @@
+@@ -0,0 +1,952 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -1516,6 +1516,35 @@ index 000000000..deeccc7d5
 +		return;
 +	}
 +	SelectGroup(group);
++	SelectionChanged();
++
++	// Jump the view to the middle of the group.
++	PixelPos sum(0, 0);
++	int count = 0;
++	for (const CUnit *unit : Selected) {
++		if (unit->IsAliveOnMap()) {
++			sum += unit->GetMapPixelPosCenter();
++			++count;
++		}
++	}
++	if (count) {
++		UI.SelectedViewport->Center(sum / count);
++	}
++}
++
++/// The deselect button first backs out of placing a building, a submenu
++/// such as the build menu, or choosing a target, as the cancel button does;
++/// only when none is under way does it deselect.
++static void PressDeselect()
++{
++	if (CursorBuilding || CurrentButtonLevel != 0 || CursorState == CursorStates::Select) {
++		CancelBuildingMode();
++		GameCursor = UI.Point.Cursor;
++		CursorState = CursorStates::Point;
++		return;
++	}
++	UnSelectAll();
++	NetworkSendSelection(nullptr, 0);
 +	SelectionChanged();
 +}
 +
@@ -1862,9 +1891,7 @@ index 000000000..deeccc7d5
 +		return true;
 +	}
 +	if (DeselectShown() && IsOnDeselect(screenPos)) {
-+		UnSelectAll();
-+		NetworkSendSelection(nullptr, 0);
-+		SelectionChanged();
++		PressDeselect();
 +		return true;
 +	}
 +	if (IsOnJoystick(screenPos)) {
@@ -2126,9 +2153,7 @@ index 000000000..deeccc7d5
 +{
 +	const PixelPos screenPos(static_cast<int>(pos.x), static_cast<int>(pos.y));
 +	if (DeselectShown() && IsOnDeselect(screenPos)) {
-+		UnSelectAll();
-+		NetworkSendSelection(nullptr, 0);
-+		SelectionChanged();
++		PressDeselect();
 +	} else if (const int group = GroupAt(screenPos)) {
 +		RecallGroup(group);
 +	} else if (!IsInJoystickZone(screenPos)) {
