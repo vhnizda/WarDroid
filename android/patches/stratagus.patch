@@ -1376,10 +1376,10 @@ index f4338a07f..c96538826 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..531561104
+index 000000000..cd1e17f17
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,1113 @@
+@@ -0,0 +1,1144 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -2044,7 +2044,29 @@ index 000000000..531561104
 +	}
 +}
 +
-+/// A group button: blue when units are saved in it, burgundy when empty.
++/// Whether the selection is exactly the group's units on the map, so orders
++/// go to that group even when it's off screen.
++static bool GroupIsSelected(int group)
++{
++	const std::vector<CUnit *> &units = GetUnitsOfGroup(group);
++	if (units.empty() || Selected.empty()) {
++		return false;
++	}
++	size_t onMap = 0;
++	for (CUnit *unit : units) {
++		if (!unit->IsAliveOnMap()) {
++			continue;
++		}
++		++onMap;
++		if (std::find(Selected.begin(), Selected.end(), unit) == Selected.end()) {
++			return false;
++		}
++	}
++	return onMap == Selected.size();
++}
++
++/// A group button: blue when units are saved in it, burgundy when empty,
++/// with a gold frame while that group is the selection.
 +static void DrawGroupButton(int group)
 +{
 +	const bool used = !GetUnitsOfGroup(group).empty();
@@ -2053,6 +2075,15 @@ index 000000000..531561104
 +	                        : (pressed ? RedButtonPressedFile : RedButtonFile);
 +	const PixelPos topLeft = GroupTopLeft(group);
 +	DrawButtonBox(file, topLeft);
++	if (used && GroupIsSelected(group)) {
++		// Inside the gap to the next button, so it never touches it.
++		const Uint32 gold = Rgb(252, 204, 52);
++		const Uint32 dark = Rgb(120, 80, 0);
++		for (int i = 1; i <= 3; ++i) {
++			Video.DrawRectangleClip(i == 3 ? dark : gold, topLeft.x - i, topLeft.y - i,
++			                        ButtonWidth + 2 * i, ButtonHeight + 2 * i);
++		}
++	}
 +
 +	// The episode title font, in gold, is about as tall as the X.
 +	const CFont *font = CFont::Get("small-title");
