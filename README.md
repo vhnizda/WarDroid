@@ -33,7 +33,7 @@ An external mouse and keyboard still work as on PC.
 - **Joystick dead zone:** the area around the joystick ignores touches, so a thumb near it can't select or order anything by accident.
 
 **Groups and workers**
-- **Group buttons 1–4:** hold one to save your selection, units or a building; it turns blue. Tap it to reselect that group without moving the view; tap it twice quickly to also jump to it.
+- **Group buttons 1–4:** hold one to save your selection, units or a building; it turns blue. Tap it to reselect that group without moving the view; tap it twice quickly to also jump to it. A gold frame shows which group is selected, so you can give it orders even when it's off screen.
 - **Idle worker button:** a yellow "!" button appears when peasants, peons or oil tankers stand idle. Tap it to jump to one, and keep tapping to cycle through them all.
 - **X button:** a big X deselects. It first backs out of building placement, the build menu or picking a target.
 
@@ -47,7 +47,7 @@ An external mouse and keyboard still work as on PC.
 - **Bigger controls:** a double-height Menu button and larger resource numbers at the top.
 - **Back button:** your phone's Back button opens the game menu, and backs out of menus.
 - **Loading a save:** the view centres on your base, not the map's corner.
-- **Save game keyboard:** your phone's own keyboard is turned off, so it never pops up over the game. Instead, the Save menu has its own keyboard in the game's style, with letters, numbers, `_` and Del.
+- **Game keyboard:** your phone's own keyboard is turned off, so it never pops up over the game. Instead, the Save menu and the Multiplayer screen have their own keyboard in the game's style, with big keys for letters, numbers, `_` and Del. On the Multiplayer screen it types into whichever box you tapped, Nickname or Password.
 
 **Multiplayer**
 - **LAN games:** phones on the same Wi-Fi find each other's games with "Search LAN".
