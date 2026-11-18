@@ -57,6 +57,12 @@ D:\w\android\gradlew.bat -p D:\w\android --project-cache-dir D:/WarcraftAI-work/
 
 The APK lands in `D:\WarcraftAI-work\build\gradle\app\outputs\apk\debug`. Paths are set in `android/gradle.properties`.
 
+### Offline APK (game data included)
+
+For a phone with no computer or internet, add `-Pwarcraftai.bundleData=D:/WarcraftAI-work/data.Wargus` to the build command. The data is zipped into the APK, without the original `install.exe`. On the first launch after each install or update, `SetupActivity` unpacks it into the game's data folder with a progress bar, then starts the game. A normal build has no data and goes straight to the game.
+
+The result is about 375 MB and contains Blizzard's files. Keep it in `D:\WarcraftAI-work\offline`, never in `dist` or anywhere else in this synced, public repo. The next normal build removes the data again.
+
 | Setting | Value |
 |---|---|
 | ABIs | `armeabi-v7a`, `arm64-v8a` |

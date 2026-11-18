@@ -9,6 +9,11 @@ def sdlJava = file('../../engine/stratagus/third-party/SDL/android-project/app/s
 
 layout.buildDirectory.set(file("${workDir}/build/gradle/app"))
 
+def bundleData = providers.gradleProperty('warcraftai.bundleData').orNull
+def offlineAssets = file("${workDir}/build/offline-assets")
+// Only the extractor needs the original installer.
+def dataExcludes = ['install.exe']
+
 android {
     namespace 'com.vaclav.wargusport'
     compileSdk 37
@@ -52,6 +57,17 @@ android {
         }
     }
 
+    // Offline build: -Pwarcraftai.bundleData=<data.Wargus folder> packs the game
+    // data into the APK, unpacked on first launch by SetupActivity. Such an APK
+    // holds Blizzard's files, so it must never be published.
+    // The folder is always an asset source, emptied for normal builds, so
+    // Gradle sees the data leave and a normal APK never keeps it.
+    sourceSets.main.assets.srcDirs += offlineAssets
+    androidResources {
+        // data.zip is already compressed.
+        noCompress 'zip'
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -60,4 +76,36 @@ android {
     lint {
         abortOnError false
     }
+}
+
+if (bundleData != null) {
+    def packData = tasks.register('packOfflineData', Zip) {
+        from(bundleData) { exclude dataExcludes }
+        destinationDirectory = offlineAssets
+        archiveFileName = 'data.zip'
+        doLast {
+            long size = 0
+            fileTree(bundleData) { exclude dataExcludes }.each { size += it.length() }
+            new File(offlineAssets, 'data.size').text = "${size}\n"
+        }
+    }
+    // Debug packaging updates the APK in place, which leaves dead space
+    // behind when hundreds of MB change, so an offline APK is always fresh.
+    def freshApk = tasks.register('freshOfflineApk', Delete) {
+        delete layout.buildDirectory.dir('outputs/apk')
+        delete layout.buildDirectory.dir('intermediates/incremental')
+    }
+    tasks.named('preBuild') { dependsOn packData, freshApk }
+} else {
+    // Coming from an offline build, also drop the APK: debug packaging
+    // updates it in place and would keep the removed data as dead space.
+    def leftover = new File(offlineAssets, 'data.zip').exists()
+    def clearData = tasks.register('clearOfflineData', Delete) {
+        delete fileTree(offlineAssets)
+        if (leftover) {
+            delete layout.buildDirectory.dir('outputs/apk')
+            delete layout.buildDirectory.dir('intermediates/incremental')
+        }
+    }
+    tasks.named('preBuild') { dependsOn clearData }
 }
