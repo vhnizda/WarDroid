@@ -47,6 +47,7 @@ An external mouse and keyboard still work as on PC.
 - **Bigger controls:** a double-height Menu button and larger resource numbers at the top.
 - **Back button:** your phone's Back button opens the game menu, and backs out of menus.
 - **Loading a save:** the view centres on your base, not the map's corner.
+- **Save game keyboard:** your phone's own keyboard is turned off, so it never pops up over the game. Instead, the Save menu has its own keyboard in the game's style, with letters, numbers, `_` and Del.
 
 **Multiplayer**
 - **LAN games:** phones on the same Wi-Fi find each other's games with "Search LAN".
