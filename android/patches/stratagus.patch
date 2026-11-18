@@ -2474,6 +2474,34 @@ index 000000000..3805826e2
 +}
 +
 +//@}
+diff --git a/src/ui/widgets.cpp b/src/ui/widgets.cpp
+index 4646eaa5c..2429c4735 100644
+--- a/src/ui/widgets.cpp
++++ b/src/ui/widgets.cpp
+@@ -1559,17 +1559,20 @@ void ImageTextField::draw(gcn::Graphics *graphics) /* override */
+ 	img->Resize(getWidth(), img->getHeight());
+ 	graphics->drawImage(img, 0, 0, 0, 0, getWidth(), img->getHeight());
+ 
++	// WarDroid: the text sits a few pixels in from the left and is centred
++	// on the bar's height, so a large font stays inside a tall bar.
++	const int padding = 3;
+ 	if (isFocused())
+ 	{
+-		drawCaret(graphics, getFont()->getWidth(drawText.substr(0, mText->getCaretPosition())) - mXScroll);
++		drawCaret(graphics, padding - 1 + getFont()->getWidth(drawText.substr(0, mText->getCaretPosition())) - mXScroll);
+ 	}
+ 
+ 	graphics->setColor(getForegroundColor());
+ 	font = getFont();
+ 	graphics->setFont(font);
+ 
+-	x = 1 - mXScroll;
+-	y = 1;
++	x = padding - mXScroll;
++	y = std::max(1, (img->getHeight() - font->getHeight()) / 2);
+ 
+ 	if (mSelectEndOffset != 0)
+ 	{
 diff --git a/src/unit/script_unittype.cpp b/src/unit/script_unittype.cpp
 index b37a42f21..bfa70f0ba 100644
 --- a/src/unit/script_unittype.cpp

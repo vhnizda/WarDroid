@@ -145,18 +145,44 @@ index 503ff66e..8e1e8e91 100644
    menu:addLabel(_("Scenario:"), offx + 16, offy + 360, Fonts["game"], false)
    mapl = menu:addLabel(string.sub(mapname, 6), offx + 16, offy + 360 + 24, Fonts["game"], false)
 diff --git a/scripts/lists/mods/Wargus-Coop-4 b/scripts/lists/mods/Wargus-Coop-4
-index f90a139b..2af23d68 100644
+index f90a139b..d48aa402 100644
 --- a/scripts/lists/mods/Wargus-Coop-4
 +++ b/scripts/lists/mods/Wargus-Coop-4
-@@ -110,7 +110,7 @@ function RunMultiPlayerGameMenu(s)
+@@ -96,8 +96,8 @@ end
+ local OldRunMultiPlayerGameMenu = RunMultiPlayerGameMenu
+ function RunMultiPlayerGameMenu(s)
+   local menu = WarMenu()
+-  local offx = (Video.Width - 640) / 2
+   local offy = ((Video.Height - 480) / 2) - 70
++  local offx = MultiPlayerFormX() - 208
+ 
+   local function FixMusic()
+     wargus.playlist = { "music/Orc Briefing" .. wargus.music_extension }
+@@ -110,12 +110,11 @@ function RunMultiPlayerGameMenu(s)
    InitGameSettings()
    InitNetwork1()
  
 -  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
-+  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, Video.Width / 2, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
  
-   menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
+-  menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
++  AddMultiPlayerTitle(menu, offx, offy)
  
+-  menu:writeText(_("Nickname :"), 208 + offx, 248 + offy)
+-  local nick = menu:addTextInputField(GetLocalPlayerName(), offx + 298, 244 + offy)
++  local nick = AddMultiPlayerField(menu, _("Nickname :"), GetLocalPlayerName(), 208 + offx, 232 + offy)
+ 
+   menu:addFullButton(_("~!Join Co-op"), "j", 208 + offx, 298 + (36 * 2) + offy,
+     function()
+@@ -141,6 +140,8 @@ function RunMultiPlayerGameMenu(s)
+   menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", 208 + offx, 298 + (36 * 5) + offy,
+     function() menu:stop() end)
+ 
++  AddMultiPlayerKeyboard(menu, 230 + offy, {nick})
++
+   menu:run()
+ 
+   ExitNetwork1()
 diff --git a/scripts/menus/campaign.lua b/scripts/menus/campaign.lua
 index 216f4d0f..1d673e0f 100644
 --- a/scripts/menus/campaign.lua
@@ -386,7 +412,7 @@ index 658d10d1..6e258e64 100644
    menu:run(false)
  end
 diff --git a/scripts/menus/network.lua b/scripts/menus/network.lua
-index 3012cf66..2717c133 100644
+index 3012cf66..c8c13199 100644
 --- a/scripts/menus/network.lua
 +++ b/scripts/menus/network.lua
 @@ -203,6 +203,7 @@ function RunJoinIpMenu()
@@ -491,15 +517,179 @@ index 3012cf66..2717c133 100644
      menu.option_fow:setEnabled(false)
      menu.option_terrain:setEnabled(false)
      menu.option_units:setEnabled(false)
-@@ -859,7 +886,7 @@ function RunMultiPlayerGameMenu(s)
+@@ -843,10 +870,128 @@ function RunCreateMultiGameMenu(s)
+   DefinePlayerTypes = oldDefinePlayerTypes
+ end
+ 
++-- WarDroid: when the screen is wide enough, the multiplayer form moves to the
++-- left and the on-screen keyboard sits to its right, so a phone can type a
++-- nickname or password. The spare width is split evenly around the two.
++local mpFormWidth = 280
++local mpMinGap = 10
++
++-- The keyboard's scale, or nil when there's no room for it.
++local function MultiPlayerKeyboardScale()
++  return ScreenKeyboardScale(Video.Width - mpFormWidth - 3 * mpMinGap)
++end
++
++-- The width left over around the form and the keyboard.
++local function MultiPlayerSpare()
++  return Video.Width - mpFormWidth - ScreenKeyboardWidth(MultiPlayerKeyboardScale())
++end
++
++-- The left edge of the form: label, fields and buttons.
++function MultiPlayerFormX()
++  if (MultiPlayerKeyboardScale() ~= nil) then
++    return math.floor(MultiPlayerSpare() / 3)
++  end
++  return (Video.Width - 640) / 2 + 208
++end
++
++-- The keyboard's left edge, or nil when there's no keyboard.
++local function MultiPlayerKeyboardX()
++  if (MultiPlayerKeyboardScale() == nil) then
++    return nil
++  end
++  return math.floor(MultiPlayerSpare() / 3) * 2 + mpFormWidth
++end
++
++-- The large font at 130%, for the screen's title.
++local titleFont = nil
++local function TitleFont()
++  if (titleFont == nil) then
++    -- large.png is a grid of 15 x 14 glyphs of 17 x 17 pixels.
++    local g = CGraphic:ForceNew("ui/fonts/large.png", 17, 17)
++    g:Load()
++    g:Resize(15 * 22, 14 * 22)
++    titleFont = CFont:New("large-130", g)
++  end
++  return titleFont
++end
++
++-- Add the screen's title: at the top right over the keyboard, or where
++-- Wargus had it when there's no keyboard.
++function AddMultiPlayerTitle(menu, offx, offy)
++  local title = _("~<Multiplayer Network Game~>")
++  local x = MultiPlayerKeyboardX()
++  if (x == nil) then
++    menu:addLabel(title, offx + 640/2 + 12, offy + 192, TitleFont())
++  else
++    local width = ScreenKeyboardWidth(MultiPlayerKeyboardScale())
++    menu:addLabel(title, x + width / 2, offy + 110, TitleFont())
++  end
++end
++
++-- Add the keyboard at height y, typing into whichever of fields was tapped
++-- last (the first one to begin with). The first key typed into a field
++-- replaces its text, like the save menu.
++function AddMultiPlayerKeyboard(menu, y, fields)
++  local scale = MultiPlayerKeyboardScale()
++  if (scale == nil) then
++    return
++  end
++  local current = 1
++  local fresh = {}
++  for i, f in ipairs(fields) do
++    fresh[i] = true
++    local index = i
++    f:setMouseCallback(function(evt)
++      if (evt == "mousePress") then
++        current = index
++      end
++    end)
++  end
++  AddScreenKeyboard(menu, scale, MultiPlayerKeyboardX(), y, ScreenKeyboardHeight(scale),
++    function() return fields[current] end,
++    function() return fresh[current] end,
++    function(v) fresh[current] = v end)
++end
++
++-- Text drawn with a black outline, so it stands out on the light background:
++-- black copies one pixel off in each direction, then the text on top.
++DefineFontColor("outline",
++  {0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0})
++-- Like menu:addLabel, centred on x unless center is false.
++function AddOutlinedLabel(menu, text, x, y, font, center)
++  for dx = -1, 1 do
++    for dy = -1, 1 do
++      if (dx ~= 0 or dy ~= 0) then
++        menu:addLabel("~outline~" .. text, x + dx, y + dy, font, center)
++      end
++    end
++  end
++  return menu:addLabel(text, x, y, font, center)
++end
++
++function WriteOutlinedText(menu, text, x, y, font)
++  return AddOutlinedLabel(menu, text, x, y, font or Fonts["game"], false)
++end
++
++-- Add a labelled text field in the large font, filling the form's width
++-- from x. Returns the field and the y below it.
++function AddMultiPlayerField(menu, label, text, x, y)
++  local font = Fonts["large"]
++  local labelWidth = math.max(font:Width(_("Nickname :")), font:Width(_("Password :"))) + 10
++  -- The bar is 18 pixels tall; 20% taller keeps the large text inside it.
++  local height = 22
++  WriteOutlinedText(menu, label, x, y + (height - font:Height()) / 2, font)
++  local field = menu:addTextInputField(text, x + labelWidth, y, mpFormWidth - labelWidth)
++  field:setFont(font)
++  SetTextFieldHeight(field, mpFormWidth - labelWidth, height)
++  return field, y + height + 6
++end
++
+ function RunMultiPlayerGameMenu(s)
+   local menu = WarMenu()
+-  local offx = (Video.Width - 640) / 2
+   local offy = ((Video.Height - 480) / 2) - 70
++  -- The form's layout is unchanged from Wargus, which put it at 208 + offx.
++  local offx = MultiPlayerFormX() - 208
+ 
+   local function FixMusic()
+     wargus.playlist = { "music/Orc Briefing" .. wargus.music_extension }
+@@ -859,18 +1004,16 @@ function RunMultiPlayerGameMenu(s)
    InitGameSettings()
    InitNetwork1()
  
 -  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
-+  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+-
+-  menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, Video.Width / 2, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
  
-   menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
+-  menu:writeText(_("Nickname :"), 208 + offx, 248 + offy)
+-  local nick = menu:addTextInputField(GetLocalPlayerName(), offx + 298, 244 + offy)
++  AddMultiPlayerTitle(menu, offx, offy)
  
+-  menu:writeText(_("Password :"), 208 + offx, 248 + offy + 28)
+-  local pass = menu:addTextInputField("", offx + 298, 244 + offy + 28)
++  local nick, rowY = AddMultiPlayerField(menu, _("Nickname :"), GetLocalPlayerName(), 208 + offx, 232 + offy)
++  local pass
++  pass, rowY = AddMultiPlayerField(menu, _("Password :"), "", 208 + offx, rowY)
+   pass:setPassword(true);
+ 
+-  local loginBtn = menu:addHalfButton(_("Go ~!Online"), "o", 208 + offx, 298 + (36 * 0) + offy,
++  local loginBtn = menu:addHalfButton(_("Go ~!Online"), "o", 208 + offx, rowY + 4,
+     function()
+       if nick:getText() ~= GetLocalPlayerName() then
+         SetLocalPlayerName(nick:getText())
+@@ -886,7 +1029,7 @@ function RunMultiPlayerGameMenu(s)
+          RunOnlineMenu()
+       end
+   end)
+-  local signupLabel = menu:addLabel(
++  local signupLabel = AddOutlinedLabel(menu,
+      _("Sign up"),
+      loginBtn:getWidth() + loginBtn:getX() + loginBtn:getWidth() / 2,
+      loginBtn:getY() + loginBtn:getHeight() / 4)
+@@ -980,6 +1123,8 @@ function RunMultiPlayerGameMenu(s)
+   menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", 208 + offx, 298 + (36 * 5) + offy,
+     function() menu:stop() end)
+ 
++  AddMultiPlayerKeyboard(menu, 230 + offy, {nick, pass})
++
+   menu:run()
+ 
+   ExitNetwork1()
 diff --git a/scripts/menus/options.lua b/scripts/menus/options.lua
 index 130b9faf..3299abce 100644
 --- a/scripts/menus/options.lua
@@ -523,15 +713,15 @@ index 130b9faf..3299abce 100644
     menu:addLabel(_("~<Game Options~>"), offx + 640/2, offy + 104 + 10)
     menu:addFullButton(_("Speeds (~<F6~>)"), "f6", offx + 208, offy + 104 + 36*1,
 diff --git a/scripts/menus/save.lua b/scripts/menus/save.lua
-index 3219ffae..7c9002b8 100644
+index 3219ffae..05952514 100644
 --- a/scripts/menus/save.lua
 +++ b/scripts/menus/save.lua
-@@ -34,19 +34,108 @@ function RunConfirmErase(name, menu)
+@@ -34,19 +34,162 @@ function RunConfirmErase(name, menu)
    confirm:run(false)
  end
  
-+-- WarDroid: an on-screen keyboard right of the save window, so a save can
-+-- be named on a phone without its own keyboard.
++-- WarDroid: an on-screen keyboard, so a phone without its own keyboard can
++-- name a save or type a nickname. The multiplayer menu uses it too.
 +local keyArt = {}
 +local function KeyArt(file, w, h)
 +  local key = file .. "@" .. tostring(w) .. "x" .. tostring(h)
@@ -544,36 +734,75 @@ index 3219ffae..7c9002b8 100644
 +  return keyArt[key]
 +end
 +
++-- Make a text field taller. Its bar image is always drawn at the image's own
++-- height, so the field gets a stretched copy of the bar.
++function SetTextFieldHeight(field, width, height)
++  local widgets = "ui/orc/widgets/"
++  if (GetPlayerData(GetThisPlayer(), "RaceName") == "human") then
++    widgets = "ui/human/widgets/"
++  end
++  field:setItemImage(KeyArt(widgets .. "pulldown-bar-normal.png", width, height))
++  field:setSize(width, height)
++end
++
 +local keyRows = {
 +  {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
 +  {"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
 +  {"a", "s", "d", "f", "g", "h", "j", "k", "l", "Del"},
 +  {"z", "x", "c", "v", "b", "n", "m", "_"},
 +}
-+local keyWidth = 38
-+local keyHeight = 34
-+local keyGap = 4
-+local keyMargin = 16
-+local keyboardWidth = 10 * keyWidth + 9 * keyGap + 2 * keyMargin
++-- Key sizes at the given scale: 1 is the original size, ScreenKeyboardBig
++-- is used wherever the screen has room, for bigger fingers.
++ScreenKeyboardBig = 1.25
++local function KeyMetrics(scale)
++  local function s(v) return math.floor(v * scale + 0.5) end
++  return s(38), s(34), s(4), s(16) -- key width, key height, gap, margin
++end
++
++function ScreenKeyboardWidth(scale)
++  local keyWidth, keyHeight, keyGap, keyMargin = KeyMetrics(scale)
++  return 10 * keyWidth + 9 * keyGap + 2 * keyMargin
++end
++
++function ScreenKeyboardHeight(scale)
++  local keyWidth, keyHeight, keyGap, keyMargin = KeyMetrics(scale)
++  return 4 * keyHeight + 3 * keyGap + 2 * keyMargin
++end
++
++-- The biggest scale whose keyboard fits in the given width, or nil.
++function ScreenKeyboardScale(room)
++  if (room >= ScreenKeyboardWidth(ScreenKeyboardBig)) then
++    return ScreenKeyboardBig
++  elseif (room >= ScreenKeyboardWidth(1)) then
++    return 1
++  end
++  return nil
++end
++
 +local keyboardGap = 8
 +
-+-- Add the keyboard to menu at x, typing into the text field t. The first key
-+-- pressed replaces the default name; isFresh and setFresh track that.
-+local function AddSaveKeyboard(menu, x, height, t, isFresh, setFresh)
-+  menu:add(ImageWidget(KeyArt(panel(3), keyboardWidth, height)), x, 0)
++-- Add the keyboard at the given scale to menu at (x, y) on a panel of the
++-- given height, typing into the text field that target() returns. The first
++-- key pressed replaces the field's default text while isFresh() says so;
++-- setFresh(false) ends that.
++function AddScreenKeyboard(menu, scale, x, y, height, target, isFresh, setFresh)
++  local keyWidth, keyHeight, keyGap = KeyMetrics(scale)
++  local keyboardWidth = ScreenKeyboardWidth(scale)
++  menu:add(ImageWidget(KeyArt(panel(3), keyboardWidth, height)), x, y)
 +
 +  local widgets = "ui/orc/widgets/"
 +  if (GetPlayerData(GetThisPlayer(), "RaceName") == "human") then
 +    widgets = "ui/human/widgets/"
 +  end
-+  local top = (height - (4 * keyHeight + 3 * keyGap)) / 2
++  local top = y + (height - (4 * keyHeight + 3 * keyGap)) / 2
 +  for row, keys in ipairs(keyRows) do
 +    local rowWidth = table.getn(keys) * keyWidth + (table.getn(keys) - 1) * keyGap
 +    local left = x + (keyboardWidth - rowWidth) / 2
-+    local y = top + (row - 1) * (keyHeight + keyGap)
++    local ky = top + (row - 1) * (keyHeight + keyGap)
 +    for i, key in ipairs(keys) do
-+      local b = menu:addImageButton(key, "", left + (i - 1) * (keyWidth + keyGap), y,
++      local b = menu:addImageButton(key, "", left + (i - 1) * (keyWidth + keyGap), ky,
 +        function()
++          local t = target()
 +          local text = t:getText()
 +          if (isFresh()) then
 +            text = ""
@@ -604,14 +833,15 @@ index 3219ffae..7c9002b8 100644
  function RunSaveMenu(isreturn)
 -  local menu = WarGameMenu(panel(3))
 -  menu:resize(384, 256)
-+  local withKeyboard = Video.Width >= 384 + keyboardGap + keyboardWidth
++  local scale = ScreenKeyboardScale(Video.Width - 384 - keyboardGap)
++  local withKeyboard = scale ~= nil
 +  local menu
 +  if (withKeyboard) then
 +    -- The save window on the left, the keyboard on the right.
 +    menu = WarGameMenu(nil)
 +    menu:setOpaque(false)
 +    menu:add(ImageWidget(KeyArt(panel(3), 384, 256)), 0, 0)
-+    menu:resize(384 + keyboardGap + keyboardWidth, 256)
++    menu:resize(384 + keyboardGap + ScreenKeyboardWidth(scale), 256)
 +  else
 +    menu = WarGameMenu(panel(3))
 +    menu:resize(384, 256)
@@ -619,17 +849,32 @@ index 3219ffae..7c9002b8 100644
  
    menu:addLabel(_("Save Game"), 384 / 2, 11)
  
++  -- WarDroid: the name field is 30% taller, in the large font, and the save
++  -- list below it gives up a row to make room. The list scrolls when there
++  -- are more saves than rows.
    local t = menu:addTextInputField("game.sav", (384 - 300 - 18) / 2, 11 + 36, 318)
++  t:setFont(Fonts["large"])
++  SetTextFieldHeight(t, 318, 24)
    t:requestFocus()
  
 +  local fresh = true
 +  if (withKeyboard) then
-+    AddSaveKeyboard(menu, 384 + keyboardGap, 256, t,
++    AddScreenKeyboard(menu, scale, 384 + keyboardGap, 0, 256, function() return t end,
 +      function() return fresh end, function(v) fresh = v end)
 +  end
 +
    local browser = menu:addBrowser("~save", ".sav.gz$",
-     (384 - 300 - 18) / 2, 11 + 36 + 22, 318, 126)
+-    (384 - 300 - 18) / 2, 11 + 36 + 22, 318, 126)
++    (384 - 300 - 18) / 2, 11 + 36 + 28, 318, 108)
++  -- The list's rows are as wide as the box, so with the vertical scroll bar
++  -- they no longer fit and a horizontal bar appears too, hiding a row. When
++  -- there are more saves than rows, narrow the rows by the bar's width:
++  -- setting the font sizes the rows to the box's width at the time.
++  if (table.getn(browser.itemslist) > 6) then
++    browser:setSize(318 - browser:getScrollbarWidth(), 108)
++    browser:setFont(Fonts["game"])
++    browser:setSize(318, 108)
++  end
    local function cb(s)
      t:setText(browser:getSelectedItem())
 +    t:setCaretPosition(string.len(t:getText()))
