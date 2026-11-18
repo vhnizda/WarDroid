@@ -5,6 +5,8 @@ import java.io.File;
 import android.content.Context;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 
 import org.libsdl.app.SDLActivity;
 
@@ -13,6 +15,37 @@ public class GameActivity extends SDLActivity {
     // Wi-Fi drivers drop multicast and broadcast packets to save power unless
     // an app holds this lock. LAN game discovery needs them.
     private WifiManager.MulticastLock multicastLock;
+
+    // At startup the surface first leaves room for the status and navigation
+    // bars, then grows to the full screen as they hide. If it grows while the
+    // game is still creating its window, SDL drops that resize, and the game
+    // keeps drawing at the smaller size in the top left corner. So shortly
+    // after the game gets focus, SDL resends the surface's size; a size that
+    // hasn't changed is ignored.
+    private static final long[] RESIZE_RESEND_MS = { 300, 1000, 2500 };
+    private final Handler resizeHandler = new Handler(Looper.getMainLooper());
+    private final Runnable resendSize = () -> {
+        if (!SDLActivity.mBrokenLibraries) {
+            SDLActivity.onNativeResize();
+        }
+    };
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        resizeHandler.removeCallbacks(resendSize);
+        if (hasFocus) {
+            for (long delay : RESIZE_RESEND_MS) {
+                resizeHandler.postDelayed(resendSize, delay);
+            }
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        resizeHandler.removeCallbacks(resendSize);
+        super.onDestroy();
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
