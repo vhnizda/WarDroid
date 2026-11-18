@@ -11,6 +11,37 @@ index 689a3674..9ffb2bb2 100644
      menu:add(label, (width - label:getWidth()) / 2, label:getHeight())
      
      local gog, bnet, dos, quit
+diff --git a/scripts/guichan.lua b/scripts/guichan.lua
+index b3535f31..4bbc1452 100644
+--- a/scripts/guichan.lua
++++ b/scripts/guichan.lua
+@@ -1094,7 +1094,7 @@ function RunSinglePlayerTypeMenu()
+   local offx = (Video.Width - 640) / 2
+   local offy = (Video.Height - 480) / 2
+ 
+-  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
+   menu:addLabel(_("~<Single Player~>"), offx + 320, offy + 212 - 25)
+ 
+   menu:addFullButton(_("~!Standard Game"), "s", offx + 208, offy + 104 + 36*3,
+@@ -1179,7 +1179,7 @@ function RunSinglePlayerGameMenu()
+   -- Logo
+   menu:addLabel(_("~<Single Player Game Setup~>"), offx + 640/2 + 12, offy + 35)
+   -- Copyright information.
+-  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
+   
+   -- Error handling function
+   function ErrorMessage(errmsg)
+@@ -1606,7 +1606,7 @@ function BuildProgramStartMenu()
+   local offx = (Video.Width - 640) / 2
+   local offy = (Video.Height - 480) / 2
+   
+-  menu:addLabel(wargus.Name .. _(" V") .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
++  menu:addLabel(wargus.Name .. _(" V") .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
+   
+   menu:addFullButton(_("~!Single Player Game"), "s", offx + 208, offy + 104 + 36*0,
+     function() RunSinglePlayerTypeMenu(); menu:stop(1) end)
 diff --git a/scripts/human/ui_pandora.lua b/scripts/human/ui_pandora.lua
 index 74c9af36..bac78137 100644
 --- a/scripts/human/ui_pandora.lua
@@ -74,8 +105,60 @@ index 74c9af36..bac78137 100644
  UI.MenuButton.Text = _("Menu (~<F10~>)")
  UI.MenuButton.Style = FindButtonStyle("main")
  UI.MenuButton:SetCallback(
+diff --git a/scripts/lists/maps/For the Motherland b/scripts/lists/maps/For the Motherland
+index 0d44dc55..93dd81b7 100644
+--- a/scripts/lists/maps/For the Motherland	
++++ b/scripts/lists/maps/For the Motherland	
+@@ -2478,7 +2478,7 @@ function NewRunSinglePlayerGameMenu()
+   local descriptionl
+   local tilesetdd
+ 
+-  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+   
+   menu:addLabel(_("Scenario:"), offx + 16, offy + 360, Fonts["game"], false)
+   mapl = menu:addLabel(string.sub(mapname, 6), offx + 16, offy + 360 + 24, Fonts["game"], false)
+diff --git a/scripts/lists/maps/Front Lines b/scripts/lists/maps/Front Lines
+index f0086f67..85e0f6ca 100644
+--- a/scripts/lists/maps/Front Lines	
++++ b/scripts/lists/maps/Front Lines	
+@@ -246,7 +246,7 @@ function NewRunSinglePlayerGameMenu()
+   local descriptionl
+   local tilesetdd
+ 
+-  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+   
+   menu:addLabel(_("Scenario:"), offx + 16, offy + 360, Fonts["game"], false)
+   mapl = menu:addLabel(string.sub(mapname, 6), offx + 16, offy + 360 + 24, Fonts["game"], false)
+diff --git a/scripts/lists/maps/Skirmish Classic b/scripts/lists/maps/Skirmish Classic
+index 503ff66e..2f406c47 100644
+--- a/scripts/lists/maps/Skirmish Classic	
++++ b/scripts/lists/maps/Skirmish Classic	
+@@ -54,7 +54,7 @@ function NewRunSinglePlayerGameMenu()
+   local descriptionl
+   local tilesetdd
+ 
+-  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+   
+   menu:addLabel(_("Scenario:"), offx + 16, offy + 360, Fonts["game"], false)
+   mapl = menu:addLabel(string.sub(mapname, 6), offx + 16, offy + 360 + 24, Fonts["game"], false)
+diff --git a/scripts/lists/mods/Wargus-Coop-4 b/scripts/lists/mods/Wargus-Coop-4
+index f90a139b..0fe4bc78 100644
+--- a/scripts/lists/mods/Wargus-Coop-4
++++ b/scripts/lists/mods/Wargus-Coop-4
+@@ -110,7 +110,7 @@ function RunMultiPlayerGameMenu(s)
+   InitGameSettings()
+   InitNetwork1()
+ 
+-  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+ 
+   menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
+ 
 diff --git a/scripts/menus/campaign.lua b/scripts/menus/campaign.lua
-index 216f4d0f..b52e4586 100644
+index 216f4d0f..243203ee 100644
 --- a/scripts/menus/campaign.lua
 +++ b/scripts/menus/campaign.lua
 @@ -34,6 +34,10 @@ function Briefing(title, objs, bg, text, voices)
@@ -97,6 +180,15 @@ index 216f4d0f..b52e4586 100644
  end
  
  function GetCampaignState(campaign)
+@@ -337,7 +342,7 @@ function RunCampaignSubmenu(campaign)
+   menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", offx + 208, offy + 212 + (36 * 6),
+     function()  menu:stop(1); RunSinglePlayerTypeMenu(); currentCampaign = nil; currentState = nil; end)
+ 
+-  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+   
+   menu:run()
+ 
 diff --git a/scripts/menus/credits.lua b/scripts/menus/credits.lua
 index f2565e01..38708460 100644
 --- a/scripts/menus/credits.lua
@@ -119,6 +211,19 @@ index f2565e01..38708460 100644
  	"Stratagus Homepage: ", GetStratagusHomepage(),
  	"",
  	"",
+diff --git a/scripts/menus/editor.lua b/scripts/menus/editor.lua
+index 657575ea..4529b6c9 100644
+--- a/scripts/menus/editor.lua
++++ b/scripts/menus/editor.lua
+@@ -134,7 +134,7 @@ function RunEditorMenu()
+   local offx = (Video.Width - 640) / 2
+   local offy = (Video.Height - 480) / 2
+ 
+-  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+   
+   menu:addLabel(_("~<Map Editor~>"), offx + 320, offy + 212 - 25)
+   local buttonNewMap =
 diff --git a/scripts/menus/help.lua b/scripts/menus/help.lua
 index 658d10d1..6e258e64 100644
 --- a/scripts/menus/help.lua
@@ -267,7 +372,7 @@ index 658d10d1..6e258e64 100644
    menu:run(false)
  end
 diff --git a/scripts/menus/network.lua b/scripts/menus/network.lua
-index 3012cf66..f2349749 100644
+index 3012cf66..b7b7c478 100644
 --- a/scripts/menus/network.lua
 +++ b/scripts/menus/network.lua
 @@ -203,6 +203,7 @@ function RunJoinIpMenu()
@@ -372,6 +477,37 @@ index 3012cf66..f2349749 100644
      menu.option_fow:setEnabled(false)
      menu.option_terrain:setEnabled(false)
      menu.option_units:setEnabled(false)
+@@ -859,7 +886,7 @@ function RunMultiPlayerGameMenu(s)
+   InitGameSettings()
+   InitNetwork1()
+ 
+-  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+ 
+   menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
+ 
+diff --git a/scripts/menus/options.lua b/scripts/menus/options.lua
+index 130b9faf..7212bd9b 100644
+--- a/scripts/menus/options.lua
++++ b/scripts/menus/options.lua
+@@ -728,7 +728,7 @@ function BuildVideoOptionsMenu()
+       vlist[i] = tostring(videoModes[i][1]) .. " x " .. tostring(videoModes[i][2]) .. ((videoModes[i][3] and (" (Keep ratio)")) or "")
+    end
+ 
+-   menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, ((Video.Width - 640) / 2 + 320), (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
++   menu:addLabel(wargus.Name .. " V" .. wargus.Version, ((Video.Width - 640) / 2 + 320), (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+ 
+    menu:addLabel(_("Video Options"), offx + 176, offy + 1 + 26*-2)
+    menu:addLabel(_("Video Resolution"), offx + 16, offy + 34 , Fonts["game"], false)
+@@ -875,7 +875,7 @@ function RunOptionsSubMenu()
+    local offx = (Video.Width - 640) / 2
+    local offy = (Video.Height - 480) / 2
+    
+-   menu:addLabel(wargus.Name .. _(" V") .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
++   menu:addLabel(wargus.Name .. _(" V") .. wargus.Version, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
+    
+    menu:addLabel(_("~<Game Options~>"), offx + 640/2, offy + 104 + 10)
+    menu:addFullButton(_("Speeds (~<F6~>)"), "f6", offx + 208, offy + 104 + 36*1,
 diff --git a/scripts/menus/save.lua b/scripts/menus/save.lua
 index 3219ffae..7c9002b8 100644
 --- a/scripts/menus/save.lua
@@ -577,7 +713,7 @@ index e21fd3fe..5d52798a 100644
    print("\t[reveal] -- reveal the map")
    print("\t[repeat=cnt] -- repeat the game cnt times")
 diff --git a/scripts/stratagus.lua b/scripts/stratagus.lua
-index 4811fa6b..c563a719 100644
+index 4811fa6b..01715da0 100644
 --- a/scripts/stratagus.lua
 +++ b/scripts/stratagus.lua
 @@ -72,11 +72,13 @@ wargus = {}
@@ -593,7 +729,7 @@ index 4811fa6b..c563a719 100644
  wargus.Copyright = _("(c) 1998-2022 by The Stratagus Project.")
  
 -wargus.Version = "3.3.3"
-+wargus.Version = "0.2" -- WarDroid release, based on Wargus 3.3.3
++wargus.Version = "1.0" -- WarDroid release, based on Wargus 3.3.3
  wargus.Licence = "GPL v2+"
  
  
