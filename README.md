@@ -1,125 +1,127 @@
 # WarDroid
 
-WarDroid plays Warcraft II on Android phones and tablets, with touch controls built for the small screen: smart taps, a scroll joystick, pinch zoom, group buttons and hold-to-place buildings. An external mouse and keyboard work too.
+## Thanks
 
-WarDroid is based on [Wargus](https://wargus.github.io) ([source](https://github.com/Wargus/wargus)), which runs on the open source [Stratagus](https://github.com/Wargus/stratagus) engine. Both are GPL-2.0, and so is WarDroid. Our changes to them live in `android/patches`.
+WarDroid stands on the work of the **[Wargus](https://wargus.github.io)** team ([source](https://github.com/Wargus/wargus)) and the **[Stratagus](https://github.com/Wargus/stratagus)** engine. Together they rebuilt Warcraft II: Tides of Darkness as open source. Thank you to everyone who has contributed to them over the years.
 
-This repo contains no Blizzard data. Players supply `data.Wargus`, extracted from a copy of Warcraft II they own. The folder keeps the Wargus name, as does the app's package ID `com.vaclav.wargusport`, so existing installs and their data carry over.
+Like them, WarDroid is licensed under GPL-2.0. This repo contains no Blizzard game data; you need your own copy of Warcraft II.
 
-## Layout
+## About
 
-| Path | Contents |
-|---|---|
-| `engine/stratagus` | Stratagus submodule |
-| `game/wargus` | Wargus submodule |
-| `android` | Gradle project for the Android app |
-| `android/app/src/main/cpp` | Native build that wraps the engine into `libmain.so` |
-| `android/patches` | Changes to upstream code needed for Android |
+WarDroid is a port of Warcraft II to Android phones and tablets. It tries to reimagine the game as if it had been built for touch from the start. Most menus still use the original layout, stretched to fill a widescreen phone. So far the focus has been the battlefield: commanding units, building and moving around the map with your fingers.
 
-Because this folder is synced by IDrive, everything heavy lives on D: instead:
+An external mouse and keyboard still work as on PC.
 
-| Path | Contents |
-|---|---|
-| `D:\WarcraftAI-work\git` | Git history, including submodules |
-| `D:\WarcraftAI-work\build` | Build output |
-| `D:\WarcraftAI-work\data` | Extracted game data, never committed |
-| `D:\WarcraftAI-work\gradle-home` | Gradle caches |
-| `D:\Android` | Android Studio and SDK |
+**How it's made:** WarDroid is developed with heavy use of [Claude Code](https://claude.com/claude-code), Anthropic's AI coding assistant. I come up with the ideas, decide how the game should feel and test it on real phones. Claude Code does most of the heavy lifting: it writes the code, builds the app and tests each change on an Android emulator.
 
-## Android build
+## All features developed so far
 
-### One-time setup
+**Commanding units**
+- **Smart taps:** tap a unit to select it. Tap the ground to move there, or tap an enemy to attack it.
+- **Worker taps:** with workers selected, tap a gold mine or trees to start harvesting, or tap a damaged building to repair it.
+- **Double-tap:** double-tap a unit to select all your units of that type within 10 tiles.
+- **Selection box:** drag a finger across the map to draw a box and select every unit inside it. A slightly wobbly tap stays a tap.
+- **Health and mana bars:** selected units show a health bar that turns from green to yellow, orange and red, and casters also show a blue mana bar.
+- **Range circles:** hold a finger on a unit to see its attack and sight range.
 
-1. Create the junction `D:\w`, which points at this folder. The real path is long enough to push SDL's header copy step past the Windows command line limit.
+**Moving around the map**
+- **Shield joystick:** a wooden shield lets you move around the map with your left thumb while your right hand gives commands.
+- **Second finger:** while you hold the joystick, tap with another finger to give orders.
+- **Pinch zoom:** pinch with two fingers to zoom. The minimap's view box follows the zoom, and you can't zoom out past the map's width or height.
+- **Joystick dead zone:** the area around the joystick ignores touches, so a thumb near it can't select or order anything by accident.
 
-   ```powershell
-   New-Item -ItemType Junction -Path D:\w -Target "C:\Users\Vaclav\Cloud-Drive\0. Game Essence\WarcraftAI"
-   ```
+**Groups and workers**
+- **Group buttons 1–4:** hold one to save your selection, units or a building; it turns blue. Tap it later to reselect that group and jump to it.
+- **Idle worker button:** a yellow "!" button appears when peasants, peons or oil tankers stand idle. Tap it to jump to one, and keep tapping to cycle through them all.
+- **X button:** a big X deselects. It first backs out of building placement, the build menu or picking a target.
 
-2. Apply the patches. Repeat this after updating submodules.
+**Building**
+- **Hold to place:** hold your finger on the map and the building appears just above it, green where it fits and red where it doesn't. It's built where you let go.
+- **Scrolling while placing:** drag to the edge of the screen to scroll, or use the joystick with your other thumb.
+- **Drag to cancel:** drag the building onto the X to cancel it; the X lights up with a gold frame while you hold a building.
 
-   ```powershell
-   git -C engine/stratagus apply "$PWD\android\patches\stratagus.patch"
-   git -C engine/stratagus/third-party apply "$PWD\android\patches\stratagus-third-party.patch"
-   git -C game/wargus apply "$PWD\android\patches\wargus.patch"
-   ```
+**Screen and menus**
+- **Widescreen:** the whole game fills a widescreen phone with no black bars.
+- **Bigger controls:** a double-height Menu button and larger resource numbers at the top.
+- **Back button:** your phone's Back button opens the game menu, and backs out of menus.
+- **Loading a save:** the view centres on your base, not the map's corner.
 
-3. Build the Windows tolua++, which generates the engine's Lua bindings during the Android build. This needs Visual Studio Build Tools 2022 with the C++ workload.
+**Multiplayer**
+- **LAN games:** phones on the same Wi-Fi find each other's games with "Search LAN".
 
-   ```powershell
-   cmake -S D:/w/engine/stratagus/third-party/lua-5.1.5 -B D:/WarcraftAI-work/build/host-tolua -G "Visual Studio 17 2022" -A x64
-   cmake --build D:/WarcraftAI-work/build/host-tolua --config Release --target toluapp
-   ```
+## Build and install it yourself
 
-### Building the APK
+You'll need a Windows 10 or 11 PC, a USB cable, and your own copy of Warcraft II (the Battle.net Edition from GOG works). Your phone needs Android 6.0 or newer. Android Studio is not needed.
 
-```powershell
-$env:JAVA_HOME = 'D:\Android\AndroidStudio\jbr'
-$env:ANDROID_HOME = 'D:\Android\Sdk'
-$env:GRADLE_USER_HOME = 'D:\WarcraftAI-work\gradle-home'
-D:\w\android\gradlew.bat -p D:\w\android --project-cache-dir D:/WarcraftAI-work/gradle-project-cache assembleDebug
+### 1. Install the tools (one time)
+
+- **[Git](https://git-scm.com/download/win).**
+- **A Java JDK, version 17 or newer:** for example [Eclipse Temurin](https://adoptium.net).
+- **[Android command-line tools](https://developer.android.com/studio#command-line-tools-only):** unzip them to `C:\Android\cmdline-tools\latest`, then run:
+  ```
+  C:\Android\cmdline-tools\latest\bin\sdkmanager.bat --sdk_root=C:\Android "platform-tools" "platforms;android-37" "ndk;28.2.13676358" "cmake;3.31.6"
+  ```
+- **[Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022):** tick **Desktop development with C++**. This builds two small PC helpers: one used during the build, and the tool that extracts the game data.
+
+### 2. Get the code
+
+```
+git clone --recursive https://github.com/vhnizda/WarDroid.git C:\WarDroid
+cd C:\WarDroid
+git -C engine/stratagus apply ..\..\android\patches\stratagus.patch
+git -C engine/stratagus/third-party apply ..\..\..\android\patches\stratagus-third-party.patch
+git -C game/wargus apply ..\..\android\patches\wargus.patch
 ```
 
-The APK lands in `D:\WarcraftAI-work\build\gradle\app\outputs\apk\debug`. Paths are set in `android/gradle.properties`.
+Keep the folder path short, like `C:\WarDroid`. Long paths break part of the Android build.
 
-| Setting | Value |
-|---|---|
-| ABIs | `armeabi-v7a`, `arm64-v8a` |
-| Minimum Android | 6.0 (API 23) |
-| Target API | 33, because SDL 2.0.22 breaks on Android 14 rules at 34 and above |
-| NDK | 28.2.13676358 |
-| CMake | 3.31.6 from the SDK |
-| Gradle and AGP | 9.9.0 and 9.5.1 |
+### 3. Build the helper and the app
 
-### Game data
-
-Build the extractor once. Building `bzip2` first is needed because Wargus doesn't make `wartool` wait for it.
-
-```powershell
-cmake -S D:/w/game/wargus -B D:/WarcraftAI-work/build/host-wargus -G "Visual Studio 17 2022" -A x64 -DENABLE_VENDORED_LIBS=ON -DSTRATAGUS=D:/w/engine/stratagus/none.exe -DSTRATAGUS_INCLUDE_DIR=D:/w/engine/stratagus/gameheaders
-cmake --build D:/WarcraftAI-work/build/host-wargus --config Release --target bzip2
-cmake --build D:/WarcraftAI-work/build/host-wargus --config Release --target wartool
+```
+cmake -S engine/stratagus/third-party/lua-5.1.5 -B build/host-tolua -G "Visual Studio 17 2022" -A x64
+cmake --build build/host-tolua --config Release --target toluapp
 ```
 
-To build `data.Wargus`, follow the order Wargus's own launcher uses:
+Open `android\gradle.properties` and point the three paths at your folder:
+```
+warcraftai.workDir=C:/WarDroid
+warcraftai.engineDir=C:/WarDroid/engine/stratagus
+warcraftai.hostToluapp=C:/WarDroid/build/host-tolua/Release/toluapp.exe
+```
 
-1. Copy these folders from `game/wargus` into an empty `D:\WarcraftAI-work\data.Wargus`: `campaigns`, `contrib` (into `graphics/ui`), `maps`, `shaders` and `scripts`.
-2. Run the extractor over it, so extracted files replace any copied ones with the same name. `D:\WarcraftAI-work\data` holds the CD copy.
+Then build. The first build takes a while.
+```
+set ANDROID_HOME=C:\Android
+android\gradlew.bat -p android assembleDebug
+```
 
-   ```powershell
-   D:\WarcraftAI-work\build\host-wargus\Release\wartool.exe D:\WarcraftAI-work\data D:\WarcraftAI-work\data.Wargus
+The app lands in `build\gradle\app\outputs\apk\debug\app-debug.apk`.
+
+### 4. Extract the game data
+
+Build the extractor:
+```
+cmake -S game/wargus -B build/host-wargus -G "Visual Studio 17 2022" -A x64 -DENABLE_VENDORED_LIBS=ON -DSTRATAGUS=engine/stratagus/none.exe -DSTRATAGUS_INCLUDE_DIR=engine/stratagus/gameheaders
+cmake --build build/host-wargus --config Release --target bzip2
+cmake --build build/host-wargus --config Release --target wartool
+```
+
+1. Make an empty folder `C:\WarDroid\data.Wargus`, and copy these folders from `game\wargus` into it: `campaigns`, `maps`, `shaders`, `scripts`, and `contrib` (copied as `graphics\ui`).
+2. Run the extractor, replacing the first path with your Warcraft II folder:
    ```
+   build\host-wargus\Release\wartool.exe "C:\GOG Games\Warcraft II" C:\WarDroid\data.Wargus
+   ```
+3. Copy `contrib\red_cross.png` to `data.Wargus\graphics\missiles`, and `contrib\cross.png` to `data.Wargus\graphics\ui\cursors`.
 
-3. Copy `contrib/red_cross.png` to `graphics/missiles` and `contrib/cross.png` to `graphics/ui/cursors`, matching Wargus's install layout.
+### 5. Install on your phone
 
-### Music
+1. On the phone, turn on **Developer options** (tap **Build number** 7 times in **Settings → About phone**), then turn on **USB debugging**.
+2. Plug in the phone, accept the prompt on it, and run:
+   ```
+   set PATH=%PATH%;C:\Android\platform-tools
+   adb install build\gradle\app\outputs\apk\debug\app-debug.apk
+   adb push C:\WarDroid\data.Wargus /sdcard/Android/data/com.vaclav.wargusport/files/
+   ```
+3. Open **WarDroid** on your phone.
 
-The Battle.net Edition's music is MIDI. It's rendered on the PC to Ogg Vorbis with FluidSynth and the GeneralUser GS SoundFont (free licence, kept in `D:\WarcraftAI-work\soundfont`), which sounds as the SoundFont intends and costs the phone nothing to synthesise. FluidSynth 2.6.1 for Windows is in `D:\WarcraftAI-work\tools\fluidsynth`, from the official GitHub releases. The script also trims silence that some MIDI files leave after their last note:
-
-```powershell
-powershell -File android\music\render-music.ps1 -FluidSynth D:\WarcraftAI-work\tools\fluidsynth\fluidsynth-v2.6.1-win10-x64-cpp11\bin\fluidsynth.exe -SoundFont D:\WarcraftAI-work\soundfont\GeneralUser-GS\GeneralUser-GS.sf2 -Music D:\WarcraftAI-work\data.Wargus\music -Out D:\WarcraftAI-work\data.Wargus\music
-```
-
-Then set `wargus.music_extension = ".ogg"` in `data.Wargus/scripts/wc2-config.lua`.
-
-The fallback is to play the MIDI files on the device through TiMidity, with `wargus.music_extension = ".mid"`. That needs instruments in `data.Wargus/timidity`. Build the converter once, then run the script, which keeps only the instruments the music uses and removes the vibrato that `unsf` adds to brass and winds:
-
-```powershell
-cmake -S D:/w/engine/stratagus/third-party/unsf -B D:/WarcraftAI-work/build/host-unsf -G "Visual Studio 17 2022" -A x64
-cmake --build D:/WarcraftAI-work/build/host-unsf --config Release
-powershell -File android\music\make-timidity.ps1 -SoundFont D:\WarcraftAI-work\soundfont\GeneralUser-GS\GeneralUser-GS.sf2 -Music D:\WarcraftAI-work\data.Wargus\music -Out D:\WarcraftAI-work\data.Wargus\timidity -Unsf D:\WarcraftAI-work\build\host-unsf\Release\unsf.exe
-```
-
-The app reads game data from `Android/data/com.vaclav.wargusport/files/data.Wargus` on the device. The app has no importer yet, so copy the folder with `adb push`.
-
-### LAN multiplayer
-
-Both devices need the same APK and the same `data.Wargus`, since the join menu lives in `scripts/menus/network.lua`.
-
-The host creates a game as usual. While its game menu is open it answers search probes on UDP port 6661, and the game itself runs on UDP 6660. A joiner opens Join Game and taps **Search LAN**, which probes every address in its Wi-Fi subnet. If exactly one host answers, it joins straight away. If several answer, they appear in the server list to pick from. The engine's own mDNS discovery still runs too, for networks that pass multicast.
-
-Some routers, especially guest networks, stop devices talking to each other, and then nothing is found. An emulator behind NAT, such as MuMu in its default network mode, can join a phone's game but can't be found by one.
-
-## Upstream
-
-The submodules point at the upstream Wargus and Stratagus repos, which WarDroid is built from. To fork, create the forks on GitHub, then add them as a remote in each submodule and update `.gitmodules`.
+**Optional:** the original music is MIDI. For better-sounding music, see [docs/music.md](docs/music.md). More technical notes are in [docs/developer-notes.md](docs/developer-notes.md).
