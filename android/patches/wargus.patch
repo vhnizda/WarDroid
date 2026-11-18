@@ -12,10 +12,80 @@ index 689a3674..9ffb2bb2 100644
      
      local gog, bnet, dos, quit
 diff --git a/scripts/guichan.lua b/scripts/guichan.lua
-index b3535f31..76a2d3f0 100644
+index b3535f31..3d088238 100644
 --- a/scripts/guichan.lua
 +++ b/scripts/guichan.lua
-@@ -1094,7 +1094,7 @@ function RunSinglePlayerTypeMenu()
+@@ -114,6 +114,40 @@ g_hradio_on:Load()
+ g_hradio_on2 = CGraphic:New("ui/human/widgets/radio-pressed-selected.png")
+ g_hradio_on2:Load()
+ 
++-- The large font scaled to glyphs of the given size in pixels (17 is
++-- normal), for touch friendly menus.
++local scaledLargeFonts = {}
++function ScaledLargeFont(size, name)
++  if (scaledLargeFonts[size] == nil) then
++    -- large.png is a grid of 15 x 14 glyphs of 17 x 17 pixels.
++    local g = CGraphic:ForceNew("ui/fonts/large.png", 17, 17)
++    g:Load()
++    g:Resize(15 * size, 14 * size)
++    scaledLargeFonts[size] = CFont:New(name or ("large-" .. size), g)
++  end
++  return scaledLargeFonts[size]
++end
++
++-- The large font at 130%.
++function LargeFont130()
++  return ScaledLargeFont(22, "large-130")
++end
++
++-- The large buttons at 130%: 291 x 36 instead of 224 x 28.
++BigButtonWidth = 291
++BigButtonHeight = 36
++local bigButtonArt = {}
++local function BigButtonImage(file, width, height)
++  local key = file .. width .. "x" .. height
++  if (bigButtonArt[key] == nil) then
++    local g = CGraphic:ForceNew(file)
++    g:Load()
++    g:Resize(width, height)
++    bigButtonArt[key] = g
++  end
++  return bigButtonArt[key]
++end
++
+ -- original continue button for the campaign, chapter and victory/defeat screens
+ g_continue_n = CGraphic:New("ui/human/widgets/button-grayscale-normal.png")
+ g_continue_n:Load()
+@@ -370,7 +404,27 @@ end
+ 	b:setBorderSize(0)
+     return b
+   end
+-  
++
++  -- A large button with its caption at 130%, for touch. It's 130% of the
++  -- normal size unless a width and height are given.
++  function menu:addBigButton(caption, hotkey, x, y, callback, width, height)
++    width = width or BigButtonWidth
++    height = height or BigButtonHeight
++    local b = self:addImageButton(caption, hotkey, x, y, callback)
++    local race = "orc"
++    if (GetPlayerData(GetThisPlayer(), "RaceName") == "human") then
++      race = "human"
++    end
++    local dir = "ui/" .. race .. "/widgets/button-large-"
++    b:setNormalImage(BigButtonImage(dir .. "normal.png", width, height))
++    b:setPressedImage(BigButtonImage(dir .. "pressed.png", width, height))
++    b:setDisabledImage(BigButtonImage(dir .. "grayed.png", width, height))
++    b:setFont(LargeFont130())
++    b:setSize(width, height)
++    b:setBorderSize(0)
++    return b
++  end
++
+   function menu:addContinueButton(caption, hotkey, x, y, callback)
+     local b = self:addImageButton(caption, hotkey, x, y, callback)
+     b:setNormalImage(g_continue_n)
+@@ -1094,7 +1148,7 @@ function RunSinglePlayerTypeMenu()
    local offx = (Video.Width - 640) / 2
    local offy = (Video.Height - 480) / 2
  
@@ -24,7 +94,7 @@ index b3535f31..76a2d3f0 100644
    menu:addLabel(_("~<Single Player~>"), offx + 320, offy + 212 - 25)
  
    menu:addFullButton(_("~!Standard Game"), "s", offx + 208, offy + 104 + 36*3,
-@@ -1179,7 +1179,7 @@ function RunSinglePlayerGameMenu()
+@@ -1179,7 +1233,7 @@ function RunSinglePlayerGameMenu()
    -- Logo
    menu:addLabel(_("~<Single Player Game Setup~>"), offx + 640/2 + 12, offy + 35)
    -- Copyright information.
@@ -33,15 +103,62 @@ index b3535f31..76a2d3f0 100644
    
    -- Error handling function
    function ErrorMessage(errmsg)
-@@ -1606,7 +1606,7 @@ function BuildProgramStartMenu()
+@@ -1606,23 +1660,44 @@ function BuildProgramStartMenu()
    local offx = (Video.Width - 640) / 2
    local offy = (Video.Height - 480) / 2
    
 -  menu:addLabel(wargus.Name .. _(" V") .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
 +  menu:addLabel(wargus.Name .. _(" V") .. wargus.Version .. " - " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
    
-   menu:addFullButton(_("~!Single Player Game"), "s", offx + 208, offy + 104 + 36*0,
+-  menu:addFullButton(_("~!Single Player Game"), "s", offx + 208, offy + 104 + 36*0,
++  -- Two columns of four buttons, below the Warcraft logo and above the
++  -- version line. The gaps between and around them are fixed and equal,
++  -- and the buttons grow to fill the rest. Buttons side by side share the
++  -- same top and height, so each row lines up.
++  local top = math.floor(Video.Height * 0.33)
++  local bottom = Video.Height - 24
++  local gapY = 14
++  local gapX = math.floor(Video.Width / 16)
++  local bw = math.floor((Video.Width - 3 * gapX) / 2)
++  local bh = math.floor((bottom - top - 5 * gapY) / 4)
++  local function ButtonX(column)
++    return gapX + column * (bw + gapX)
++  end
++  local function ButtonY(row)
++    return top + gapY + row * (bh + gapY)
++  end
++  local function AddMainButton(caption, hotkey, column, row, callback)
++    local b = menu:addBigButton(caption, hotkey, ButtonX(column), ButtonY(row), callback, bw, bh)
++    -- Text half the button's height, so it fills the button.
++    b:setFont(ScaledLargeFont(math.floor(bh / 2)))
++  end
++
++  AddMainButton(_("~!Single Player Game"), "s", 0, 0,
      function() RunSinglePlayerTypeMenu(); menu:stop(1) end)
+-  menu:addFullButton(_("~!Multi Player Game"), "m", offx + 208, offy + 104 + 36*1,
+-                     function() RunMultiPlayerGameMenu(); menu:stop(1) end)
+-  menu:addFullButton(_("~!Replay Game"), "r", offx + 208, offy + 104 + 36*2,
++  AddMainButton(_("~!Multi Player Game"), "m", 0, 1,
++    function() RunMultiPlayerGameMenu(); menu:stop(1) end)
++  AddMainButton(_("~!Replay Game"), "r", 0, 2,
+     function() RunReplayGameMenu(); menu:stop(1) end)
+-  menu:addFullButton(_("~!Options"), "o", offx + 208, offy + 104 + 36*3,
++  AddMainButton(_("~!Options"), "o", 0, 3,
+     function() RunOptionsSubMenu(); menu:stop(1) end)
+-  menu:addFullButton(_("~!Load Mod"), "l", offx + 208, offy + 104 + 36*4,
++  AddMainButton(_("~!Load Mod"), "l", 1, 0,
+     function() RunLoadModMenu(); menu:stop(1) end)
+-  menu:addFullButton(_("Map ~!Editor"), "e", offx + 208, offy + 104 + 36*5,
++  AddMainButton(_("Map ~!Editor"), "e", 1, 1,
+     function() RunEditorMenu(); menu:stop(1) end)
+-  menu:addFullButton(_("S~!how Credits"), "h", offx + 208, offy + 104 + 36*6, RunShowCreditsMenu)
+-
+-  menu:addFullButton(_("E~!xit Program"), "x", offx + 208, offy + 104 + 36*7,
++  AddMainButton(_("S~!how Credits"), "h", 1, 2, RunShowCreditsMenu)
++  AddMainButton(_("E~!xit Program"), "x", 1, 3,
+     function() menu:stop() end)
+ 
+   local time = 0
 diff --git a/scripts/human/ui_pandora.lua b/scripts/human/ui_pandora.lua
 index 74c9af36..bac78137 100644
 --- a/scripts/human/ui_pandora.lua
@@ -432,7 +549,7 @@ index 658d10d1..1355ef27 100644
    menu:run(false)
  end
 diff --git a/scripts/menus/network.lua b/scripts/menus/network.lua
-index 3012cf66..b549d496 100644
+index 3012cf66..6396beec 100644
 --- a/scripts/menus/network.lua
 +++ b/scripts/menus/network.lua
 @@ -203,6 +203,7 @@ function RunJoinIpMenu()
@@ -537,7 +654,7 @@ index 3012cf66..b549d496 100644
      menu.option_fow:setEnabled(false)
      menu.option_terrain:setEnabled(false)
      menu.option_units:setEnabled(false)
-@@ -843,10 +870,158 @@ function RunCreateMultiGameMenu(s)
+@@ -843,10 +870,150 @@ function RunCreateMultiGameMenu(s)
    DefinePlayerTypes = oldDefinePlayerTypes
  end
  
@@ -574,16 +691,8 @@ index 3012cf66..b549d496 100644
 +end
 +
 +-- The large font at 130%, for the screen's title.
-+local titleFont = nil
 +local function TitleFont()
-+  if (titleFont == nil) then
-+    -- large.png is a grid of 15 x 14 glyphs of 17 x 17 pixels.
-+    local g = CGraphic:ForceNew("ui/fonts/large.png", 17, 17)
-+    g:Load()
-+    g:Resize(15 * 22, 14 * 22)
-+    titleFont = CFont:New("large-130", g)
-+  end
-+  return titleFont
++  return LargeFont130()
 +end
 +
 +-- Add the screen's title: at the top right over the keyboard, or where
@@ -697,7 +806,7 @@ index 3012cf66..b549d496 100644
  
    local function FixMusic()
      wargus.playlist = { "music/Orc Briefing" .. wargus.music_extension }
-@@ -859,24 +1034,18 @@ function RunMultiPlayerGameMenu(s)
+@@ -859,24 +1026,18 @@ function RunMultiPlayerGameMenu(s)
    InitGameSettings()
    InitNetwork1()
  
@@ -729,7 +838,7 @@ index 3012cf66..b549d496 100644
        if string.len(pass:getText()) == 0 then
           ErrorMenu("Please enter your password")
        else
-@@ -886,7 +1055,7 @@ function RunMultiPlayerGameMenu(s)
+@@ -886,7 +1047,7 @@ function RunMultiPlayerGameMenu(s)
           RunOnlineMenu()
        end
    end)
@@ -738,7 +847,7 @@ index 3012cf66..b549d496 100644
       _("Sign up"),
       loginBtn:getWidth() + loginBtn:getX() + loginBtn:getWidth() / 2,
       loginBtn:getY() + loginBtn:getHeight() / 4)
-@@ -958,21 +1127,13 @@ function RunMultiPlayerGameMenu(s)
+@@ -958,21 +1119,13 @@ function RunMultiPlayerGameMenu(s)
  
    menu:addFullButton(_("~!Join Local Game"), "j", 208 + offx, 298 + (36 * 2) + offy,
      function()
@@ -762,7 +871,7 @@ index 3012cf66..b549d496 100644
        RunCreateMultiGameMenu()
        FixMusic()
      end)
-@@ -980,6 +1141,8 @@ function RunMultiPlayerGameMenu(s)
+@@ -980,6 +1133,8 @@ function RunMultiPlayerGameMenu(s)
    menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", 208 + offx, 298 + (36 * 5) + offy,
      function() menu:stop() end)
  
