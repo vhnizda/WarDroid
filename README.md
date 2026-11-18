@@ -14,6 +14,8 @@ An external mouse and keyboard still work as on PC.
 
 **How it's made:** WarDroid is developed with heavy use of [Claude Code](https://claude.com/claude-code), Anthropic's AI coding assistant. I come up with the ideas, decide how the game should feel and test it on real phones. Claude Code does most of the heavy lifting: it writes the code, builds the app and tests each change on an Android emulator.
 
+![WarDroid on a phone: a selected peon with its health bar, the shield joystick, the idle worker button, group buttons 1 to 4 and the X](docs/images/gameplay.webp)
+
 ## All features developed so far
 
 **Commanding units**
