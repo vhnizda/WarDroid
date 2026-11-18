@@ -145,7 +145,7 @@ index 503ff66e..8e1e8e91 100644
    menu:addLabel(_("Scenario:"), offx + 16, offy + 360, Fonts["game"], false)
    mapl = menu:addLabel(string.sub(mapname, 6), offx + 16, offy + 360 + 24, Fonts["game"], false)
 diff --git a/scripts/lists/mods/Wargus-Coop-4 b/scripts/lists/mods/Wargus-Coop-4
-index f90a139b..d48aa402 100644
+index f90a139b..57a806b1 100644
 --- a/scripts/lists/mods/Wargus-Coop-4
 +++ b/scripts/lists/mods/Wargus-Coop-4
 @@ -96,8 +96,8 @@ end
@@ -158,7 +158,7 @@ index f90a139b..d48aa402 100644
  
    local function FixMusic()
      wargus.playlist = { "music/Orc Briefing" .. wargus.music_extension }
-@@ -110,12 +110,11 @@ function RunMultiPlayerGameMenu(s)
+@@ -110,30 +110,21 @@ function RunMultiPlayerGameMenu(s)
    InitGameSettings()
    InitNetwork1()
  
@@ -170,11 +170,31 @@ index f90a139b..d48aa402 100644
  
 -  menu:writeText(_("Nickname :"), 208 + offx, 248 + offy)
 -  local nick = menu:addTextInputField(GetLocalPlayerName(), offx + 298, 244 + offy)
-+  local nick = AddMultiPlayerField(menu, _("Nickname :"), GetLocalPlayerName(), 208 + offx, 232 + offy)
++  local nick = AddMultiPlayerField(menu, _("Nickname :"), MultiPlayerNickname(), 208 + offx, 232 + offy)
  
    menu:addFullButton(_("~!Join Co-op"), "j", 208 + offx, 298 + (36 * 2) + offy,
      function()
-@@ -141,6 +140,8 @@ function RunMultiPlayerGameMenu(s)
+-      if nick:getText() ~= GetLocalPlayerName() then
+-        SetLocalPlayerName(nick:getText())
+-        wc2.preferences.PlayerName = nick:getText()
+-        SavePreferences()
+-      end
++      SaveMultiPlayerNickname(nick)
+       RunJoinIpMenu()
+       FixMusic()
+     end)
+   menu:addFullButton(_("Host ~!Co-op"), "c", 208 + offx, 298 + (36 * 3) + offy,
+     function()
+-      if nick:getText() ~= GetLocalPlayerName() then
+-        SetLocalPlayerName(nick:getText())
+-        wc2.preferences.PlayerName = nick:getText()
+-        SavePreferences()
+-      end
++      SaveMultiPlayerNickname(nick)
+       RunModCampaignGameMenu()
+       FixMusic()
+     end)
+@@ -141,6 +132,8 @@ function RunMultiPlayerGameMenu(s)
    menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", 208 + offx, 298 + (36 * 5) + offy,
      function() menu:stop() end)
  
@@ -412,7 +432,7 @@ index 658d10d1..6e258e64 100644
    menu:run(false)
  end
 diff --git a/scripts/menus/network.lua b/scripts/menus/network.lua
-index 3012cf66..c8c13199 100644
+index 3012cf66..b549d496 100644
 --- a/scripts/menus/network.lua
 +++ b/scripts/menus/network.lua
 @@ -203,6 +203,7 @@ function RunJoinIpMenu()
@@ -517,7 +537,7 @@ index 3012cf66..c8c13199 100644
      menu.option_fow:setEnabled(false)
      menu.option_terrain:setEnabled(false)
      menu.option_units:setEnabled(false)
-@@ -843,10 +870,128 @@ function RunCreateMultiGameMenu(s)
+@@ -843,10 +870,158 @@ function RunCreateMultiGameMenu(s)
    DefinePlayerTypes = oldDefinePlayerTypes
  end
  
@@ -624,6 +644,36 @@ index 3012cf66..c8c13199 100644
 +  return AddOutlinedLabel(menu, text, x, y, font or Fonts["game"], false)
 +end
 +
++-- WarDroid: the nickname. A player with no name of their own yet (none
++-- saved, or the plain default) gets WarDroid and three random digits, saved
++-- straight away so it stays the same next time.
++function MultiPlayerNickname()
++  local name = wc2.preferences.PlayerName
++  if (name == nil or name == "" or name == "WarDroid") then
++    math.randomseed(os.time() + math.floor(os.clock() * 1000))
++    name = string.format("WarDroid%03d", math.random(0, 999))
++    wc2.preferences.PlayerName = name
++    SavePreferences()
++  end
++  SetLocalPlayerName(name)
++  return name
++end
++
++-- Save the name typed into the nick field when the player moves on to a
++-- game. An empty field keeps the saved name.
++function SaveMultiPlayerNickname(nick)
++  local name = nick:getText()
++  if (name == "") then
++    nick:setText(GetLocalPlayerName())
++    return
++  end
++  if (name ~= GetLocalPlayerName() or name ~= wc2.preferences.PlayerName) then
++    SetLocalPlayerName(name)
++    wc2.preferences.PlayerName = name
++    SavePreferences()
++  end
++end
++
 +-- Add a labelled text field in the large font, filling the form's width
 +-- from x. Returns the field and the y below it.
 +function AddMultiPlayerField(menu, label, text, x, y)
@@ -647,22 +697,22 @@ index 3012cf66..c8c13199 100644
  
    local function FixMusic()
      wargus.playlist = { "music/Orc Briefing" .. wargus.music_extension }
-@@ -859,18 +1004,16 @@ function RunMultiPlayerGameMenu(s)
+@@ -859,24 +1034,18 @@ function RunMultiPlayerGameMenu(s)
    InitGameSettings()
    InitNetwork1()
  
 -  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
--
--  menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
 +  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, Video.Width / 2, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+ 
+-  menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
++  AddMultiPlayerTitle(menu, offx, offy)
  
 -  menu:writeText(_("Nickname :"), 208 + offx, 248 + offy)
 -  local nick = menu:addTextInputField(GetLocalPlayerName(), offx + 298, 244 + offy)
-+  AddMultiPlayerTitle(menu, offx, offy)
- 
+-
 -  menu:writeText(_("Password :"), 208 + offx, 248 + offy + 28)
 -  local pass = menu:addTextInputField("", offx + 298, 244 + offy + 28)
-+  local nick, rowY = AddMultiPlayerField(menu, _("Nickname :"), GetLocalPlayerName(), 208 + offx, 232 + offy)
++  local nick, rowY = AddMultiPlayerField(menu, _("Nickname :"), MultiPlayerNickname(), 208 + offx, 232 + offy)
 +  local pass
 +  pass, rowY = AddMultiPlayerField(menu, _("Password :"), "", 208 + offx, rowY)
    pass:setPassword(true);
@@ -670,9 +720,16 @@ index 3012cf66..c8c13199 100644
 -  local loginBtn = menu:addHalfButton(_("Go ~!Online"), "o", 208 + offx, 298 + (36 * 0) + offy,
 +  local loginBtn = menu:addHalfButton(_("Go ~!Online"), "o", 208 + offx, rowY + 4,
      function()
-       if nick:getText() ~= GetLocalPlayerName() then
-         SetLocalPlayerName(nick:getText())
-@@ -886,7 +1029,7 @@ function RunMultiPlayerGameMenu(s)
+-      if nick:getText() ~= GetLocalPlayerName() then
+-        SetLocalPlayerName(nick:getText())
+-        wc2.preferences.PlayerName = nick:getText()
+-        SavePreferences()
+-      end
++      SaveMultiPlayerNickname(nick)
+       if string.len(pass:getText()) == 0 then
+          ErrorMenu("Please enter your password")
+       else
+@@ -886,7 +1055,7 @@ function RunMultiPlayerGameMenu(s)
           RunOnlineMenu()
        end
    end)
@@ -681,7 +738,31 @@ index 3012cf66..c8c13199 100644
       _("Sign up"),
       loginBtn:getWidth() + loginBtn:getX() + loginBtn:getWidth() / 2,
       loginBtn:getY() + loginBtn:getHeight() / 4)
-@@ -980,6 +1123,8 @@ function RunMultiPlayerGameMenu(s)
+@@ -958,21 +1127,13 @@ function RunMultiPlayerGameMenu(s)
+ 
+   menu:addFullButton(_("~!Join Local Game"), "j", 208 + offx, 298 + (36 * 2) + offy,
+     function()
+-      if nick:getText() ~= GetLocalPlayerName() then
+-        SetLocalPlayerName(nick:getText())
+-        wc2.preferences.PlayerName = nick:getText()
+-        SavePreferences()
+-      end
++      SaveMultiPlayerNickname(nick)
+       RunJoinIpMenu()
+       FixMusic()
+     end)
+   menu:addFullButton(_("~!Create Game"), "c", 208 + offx, 298 + (36 * 3) + offy,
+     function()
+-      if nick:getText() ~= GetLocalPlayerName() then
+-        SetLocalPlayerName(nick:getText())
+-        wc2.preferences.PlayerName = nick:getText()
+-        SavePreferences()
+-      end
++      SaveMultiPlayerNickname(nick)
+       RunCreateMultiGameMenu()
+       FixMusic()
+     end)
+@@ -980,6 +1141,8 @@ function RunMultiPlayerGameMenu(s)
    menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", 208 + offx, 298 + (36 * 5) + offy,
      function() menu:stop() end)
  
