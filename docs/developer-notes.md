@@ -19,8 +19,7 @@ Because this folder is synced by IDrive, everything heavy lives on D: instead:
 | `D:\WarcraftAI-work\git` | Git history, including submodules |
 | `D:\WarcraftAI-work\build` | Build output |
 | `D:\WarcraftAI-work\data` | Extracted game data, never committed |
-| `D:\WarcraftAI-work\gradle-home` | Gradle caches |
-| `D:\Android` | Android Studio and SDK |
+| `D:\Android` | Android Studio, SDK, and `gradle-home` (Gradle caches shared by all Android projects) |
 
 ## Android build
 
@@ -52,7 +51,7 @@ Because this folder is synced by IDrive, everything heavy lives on D: instead:
 ```powershell
 $env:JAVA_HOME = 'D:\Android\AndroidStudio\jbr'
 $env:ANDROID_HOME = 'D:\Android\Sdk'
-$env:GRADLE_USER_HOME = 'D:\WarcraftAI-work\gradle-home'
+$env:GRADLE_USER_HOME = 'D:\Android\gradle-home'
 D:\w\android\gradlew.bat -p D:\w\android --project-cache-dir D:/WarcraftAI-work/gradle-project-cache assembleDebug
 ```
 
