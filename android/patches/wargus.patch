@@ -285,7 +285,7 @@ index 657575ea..ac5ee53a 100644
    menu:addLabel(_("~<Map Editor~>"), offx + 320, offy + 212 - 25)
    local buttonNewMap =
 diff --git a/scripts/menus/help.lua b/scripts/menus/help.lua
-index 658d10d1..6e258e64 100644
+index 658d10d1..1355ef27 100644
 --- a/scripts/menus/help.lua
 +++ b/scripts/menus/help.lua
 @@ -89,38 +89,63 @@ function RunKeystrokeHelpMenu()
@@ -313,7 +313,7 @@ index 658d10d1..6e258e64 100644
 +  _("With workers selected, tap a gold mine or trees to start harvesting, or tap a damaged building to repair it."),
 +  _("Double-tap a unit to select all your units of that type nearby."),
 +  _("Drag a finger across the map to draw a box and select every unit inside it."),
-+  _("Hold a number button 1-4 to save your selection, units or a building; it turns blue. Tap it later to reselect that group and jump to it."),
++  _("Hold a number button 1-4 to save your selection, units or a building; it turns blue. Tap it to reselect that group; tap twice quickly to also jump to it."),
 +  _("The shield joystick lets you move around the map with your left thumb while your right hand gives commands. Pinch with two fingers to zoom."),
 +  _("A yellow ! button appears when workers stand idle. Tap it to jump to one, and keep tapping to cycle through them all."),
 +  _("To place a building, hold your finger on the map. It shows just above your finger and is built where you let go. Drag to the screen's edge to scroll."),

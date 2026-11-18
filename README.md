@@ -33,7 +33,7 @@ An external mouse and keyboard still work as on PC.
 - **Joystick dead zone:** the area around the joystick ignores touches, so a thumb near it can't select or order anything by accident.
 
 **Groups and workers**
-- **Group buttons 1–4:** hold one to save your selection, units or a building; it turns blue. Tap it later to reselect that group and jump to it.
+- **Group buttons 1–4:** hold one to save your selection, units or a building; it turns blue. Tap it to reselect that group without moving the view; tap it twice quickly to also jump to it.
 - **Idle worker button:** a yellow "!" button appears when peasants, peons or oil tankers stand idle. Tap it to jump to one, and keep tapping to cycle through them all.
 - **X button:** a big X deselects. It first backs out of building placement, the build menu or picking a target.
 

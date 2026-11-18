@@ -1376,10 +1376,10 @@ index f4338a07f..c96538826 100644
  
 diff --git a/src/ui/touch_controls.cpp b/src/ui/touch_controls.cpp
 new file mode 100644
-index 000000000..3805826e2
+index 000000000..531561104
 --- /dev/null
 +++ b/src/ui/touch_controls.cpp
-@@ -0,0 +1,1094 @@
+@@ -0,0 +1,1113 @@
 +//       _________ __                 __
 +//      /   _____//  |_____________ _/  |______     ____  __ __  ______
 +//      \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
@@ -1653,13 +1653,32 @@ index 000000000..3805826e2
 +}
 +
 +/// Select the units saved in a group. Dead units have already left it.
-+static void RecallGroup(int group)
++/// The group last tapped, and when that tap ended, to spot a double tap.
++static int LastRecalledGroup = 0;
++static Uint32 LastRecallTicks = 0;
++
++/// A tap on a group button selects its units and leaves the view where it
++/// is, so units can be called in from anywhere. Tapping the same button again
++/// quickly (pressed within the double-click time of the first tap ending)
++/// also jumps the view to them.
++///
++/// @param pressTicks  When this tap's press began.
++static void RecallGroup(int group, Uint32 pressTicks)
 +{
 +	if (GetUnitsOfGroup(group).empty()) {
 +		return;
 +	}
 +	SelectGroup(group);
 +	SelectionChanged();
++
++	const bool doubleTap = group == LastRecalledGroup
++	                       && pressTicks - LastRecallTicks <= static_cast<Uint32>(DoubleClickDelay);
++	// A third tap starts over rather than counting as another double tap.
++	LastRecalledGroup = doubleTap ? 0 : group;
++	LastRecallTicks = SDL_GetTicks();
++	if (!doubleTap) {
++		return;
++	}
 +
 +	// Jump the view to the middle of the group.
 +	PixelPos sum(0, 0);
@@ -2161,7 +2180,7 @@ index 000000000..3805826e2
 +{
 +	if (PressedGroup) {
 +		if (!PressedGroupSaved) {
-+			RecallGroup(PressedGroup);
++			RecallGroup(PressedGroup, PressedGroupTicks);
 +		}
 +		PressedGroup = 0;
 +		return true;
@@ -2372,7 +2391,7 @@ index 000000000..3805826e2
 +
 +/// A tap from an extra finger: on a control it presses it, on the map it
 +/// does what a tap there would.
-+static void ExtraTap(const PixelPrecise &pos)
++static void ExtraTap(const PixelPrecise &pos, Uint32 pressTicks)
 +{
 +	const PixelPos screenPos(static_cast<int>(pos.x), static_cast<int>(pos.y));
 +	if (DeselectShown() && IsOnDeselect(screenPos)) {
@@ -2380,7 +2399,7 @@ index 000000000..3805826e2
 +	} else if (IsOnIdle(screenPos)) {
 +		PressIdle();
 +	} else if (const int group = GroupAt(screenPos)) {
-+		RecallGroup(group);
++		RecallGroup(group, pressTicks);
 +	} else if (!IsInJoystickZone(screenPos)) {
 +		MapTapAt(screenPos);
 +	}
@@ -2451,7 +2470,7 @@ index 000000000..3805826e2
 +				if (SDL_GetTicks() - finger.Ticks <= ExtraTapMs
 +				    && std::hypot(pos.x - finger.Start.x, pos.y - finger.Start.y) <= ExtraTapSlop
 +				    && ControlsShown()) {
-+					ExtraTap(pos);
++					ExtraTap(pos, finger.Ticks);
 +				}
 +			}
 +			Fingers.erase(event.fingerId);
