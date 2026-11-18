@@ -51,9 +51,23 @@ An external mouse and keyboard still work as on PC.
 
 ## Build and install it yourself
 
+### The easy way: let Claude Code do it
+
+If you have [Claude Code](https://claude.com/claude-code) on your PC, you can skip the steps below. Open Claude Code in an empty folder and ask it something like:
+
+> Build WarDroid from https://github.com/vhnizda/WarDroid and install it on my Android phone, following its README. My Warcraft II files are in C:\GOG Games\Warcraft II.
+
+Claude Code will install the tools, build the game, extract the game data and put it all on your phone. A few things are still up to you:
+
+- **Your own game files:** you need your own copy of Warcraft II, because Claude can't provide them.
+- **USB debugging:** turn it on and plug in your phone, as in step 5 below, then accept the prompt that appears on the phone.
+- **Approvals:** Claude Code asks before it downloads or installs anything, so expect to approve a few steps.
+
+### The manual way
+
 You'll need a Windows 10 or 11 PC, a USB cable, and your own copy of Warcraft II (the Battle.net Edition from GOG works). Your phone needs Android 6.0 or newer. Android Studio is not needed.
 
-### 1. Install the tools (one time)
+#### 1. Install the tools (one time)
 
 - **[Git](https://git-scm.com/download/win).**
 - **A Java JDK, version 17 or newer:** for example [Eclipse Temurin](https://adoptium.net).
@@ -63,7 +77,7 @@ You'll need a Windows 10 or 11 PC, a USB cable, and your own copy of Warcraft II
   ```
 - **[Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022):** tick **Desktop development with C++**. This builds two small PC helpers: one used during the build, and the tool that extracts the game data.
 
-### 2. Get the code
+#### 2. Get the code
 
 ```
 git clone --recursive https://github.com/vhnizda/WarDroid.git C:\WarDroid
@@ -75,7 +89,7 @@ git -C game/wargus apply ..\..\android\patches\wargus.patch
 
 Keep the folder path short, like `C:\WarDroid`. Long paths break part of the Android build.
 
-### 3. Build the helper and the app
+#### 3. Build the helper and the app
 
 ```
 cmake -S engine/stratagus/third-party/lua-5.1.5 -B build/host-tolua -G "Visual Studio 17 2022" -A x64
@@ -97,7 +111,7 @@ android\gradlew.bat -p android assembleDebug
 
 The app lands in `build\gradle\app\outputs\apk\debug\app-debug.apk`.
 
-### 4. Extract the game data
+#### 4. Extract the game data
 
 Build the extractor:
 ```
@@ -113,7 +127,7 @@ cmake --build build/host-wargus --config Release --target wartool
    ```
 3. Copy `contrib\red_cross.png` to `data.Wargus\graphics\missiles`, and `contrib\cross.png` to `data.Wargus\graphics\ui\cursors`.
 
-### 5. Install on your phone
+#### 5. Install on your phone
 
 1. On the phone, turn on **Developer options** (tap **Build number** 7 times in **Settings → About phone**), then turn on **USB debugging**.
 2. Plug in the phone, accept the prompt on it, and run:
