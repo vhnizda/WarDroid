@@ -372,6 +372,121 @@ index 3012cf66..f2349749 100644
      menu.option_fow:setEnabled(false)
      menu.option_terrain:setEnabled(false)
      menu.option_units:setEnabled(false)
+diff --git a/scripts/menus/save.lua b/scripts/menus/save.lua
+index 3219ffae..7c9002b8 100644
+--- a/scripts/menus/save.lua
++++ b/scripts/menus/save.lua
+@@ -34,19 +34,108 @@ function RunConfirmErase(name, menu)
+   confirm:run(false)
+ end
+ 
++-- WarDroid: an on-screen keyboard right of the save window, so a save can
++-- be named on a phone without its own keyboard.
++local keyArt = {}
++local function KeyArt(file, w, h)
++  local key = file .. "@" .. tostring(w) .. "x" .. tostring(h)
++  if (keyArt[key] == nil) then
++    local g = CGraphic:ForceNew(file)
++    g:Load()
++    g:Resize(w, h)
++    keyArt[key] = g
++  end
++  return keyArt[key]
++end
++
++local keyRows = {
++  {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
++  {"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
++  {"a", "s", "d", "f", "g", "h", "j", "k", "l", "Del"},
++  {"z", "x", "c", "v", "b", "n", "m", "_"},
++}
++local keyWidth = 38
++local keyHeight = 34
++local keyGap = 4
++local keyMargin = 16
++local keyboardWidth = 10 * keyWidth + 9 * keyGap + 2 * keyMargin
++local keyboardGap = 8
++
++-- Add the keyboard to menu at x, typing into the text field t. The first key
++-- pressed replaces the default name; isFresh and setFresh track that.
++local function AddSaveKeyboard(menu, x, height, t, isFresh, setFresh)
++  menu:add(ImageWidget(KeyArt(panel(3), keyboardWidth, height)), x, 0)
++
++  local widgets = "ui/orc/widgets/"
++  if (GetPlayerData(GetThisPlayer(), "RaceName") == "human") then
++    widgets = "ui/human/widgets/"
++  end
++  local top = (height - (4 * keyHeight + 3 * keyGap)) / 2
++  for row, keys in ipairs(keyRows) do
++    local rowWidth = table.getn(keys) * keyWidth + (table.getn(keys) - 1) * keyGap
++    local left = x + (keyboardWidth - rowWidth) / 2
++    local y = top + (row - 1) * (keyHeight + keyGap)
++    for i, key in ipairs(keys) do
++      local b = menu:addImageButton(key, "", left + (i - 1) * (keyWidth + keyGap), y,
++        function()
++          local text = t:getText()
++          if (isFresh()) then
++            text = ""
++            setFresh(false)
++          end
++          if (key == "Del") then
++            text = string.sub(text, 1, -2)
++          else
++            text = text .. key
++          end
++          t:setText(text)
++          t:setCaretPosition(string.len(text))
++          t:requestFocus()
++        end)
++      b:setNormalImage(KeyArt(widgets .. "button-small-normal.png", keyWidth, keyHeight))
++      b:setPressedImage(KeyArt(widgets .. "button-small-pressed.png", keyWidth, keyHeight))
++      b:setDisabledImage(KeyArt(widgets .. "button-small-grayed.png", keyWidth, keyHeight))
++      if (key == "Del") then
++        b:setFont(Fonts["game"])
++      else
++        b:setFont(Fonts["large"])
++      end
++      b:setSize(keyWidth, keyHeight)
++    end
++  end
++end
++
+ function RunSaveMenu(isreturn)
+-  local menu = WarGameMenu(panel(3))
+-  menu:resize(384, 256)
++  local withKeyboard = Video.Width >= 384 + keyboardGap + keyboardWidth
++  local menu
++  if (withKeyboard) then
++    -- The save window on the left, the keyboard on the right.
++    menu = WarGameMenu(nil)
++    menu:setOpaque(false)
++    menu:add(ImageWidget(KeyArt(panel(3), 384, 256)), 0, 0)
++    menu:resize(384 + keyboardGap + keyboardWidth, 256)
++  else
++    menu = WarGameMenu(panel(3))
++    menu:resize(384, 256)
++  end
+ 
+   menu:addLabel(_("Save Game"), 384 / 2, 11)
+ 
+   local t = menu:addTextInputField("game.sav", (384 - 300 - 18) / 2, 11 + 36, 318)
+   t:requestFocus()
+ 
++  local fresh = true
++  if (withKeyboard) then
++    AddSaveKeyboard(menu, 384 + keyboardGap, 256, t,
++      function() return fresh end, function(v) fresh = v end)
++  end
++
+   local browser = menu:addBrowser("~save", ".sav.gz$",
+     (384 - 300 - 18) / 2, 11 + 36 + 22, 318, 126)
+   local function cb(s)
+     t:setText(browser:getSelectedItem())
++    t:setCaretPosition(string.len(t:getText()))
++    fresh = false
+   end
+   browser:setActionCallback(cb)
+ 
 diff --git a/scripts/multiplayer.lua b/scripts/multiplayer.lua
 index 3fece7e1..93ba9866 100644
 --- a/scripts/multiplayer.lua

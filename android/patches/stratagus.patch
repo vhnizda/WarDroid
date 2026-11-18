@@ -740,7 +740,7 @@ index ec8b15d03..c7b5d82d1 100644
  	// FIXME: peon/peasant with gold/wood & co are considered from
  	//   different type... idem for tankers
 diff --git a/src/tolua/ui.pkg b/src/tolua/ui.pkg
-index 56103abaa..013a4601d 100644
+index 56103abaa..36d5cb613 100644
 --- a/src/tolua/ui.pkg
 +++ b/src/tolua/ui.pkg
 @@ -21,6 +21,8 @@ class CUIButton
@@ -760,6 +760,14 @@ index 56103abaa..013a4601d 100644
  	CUIButton NetworkDiplomacyButton;
  
  	vector<CUIUserButton> UserButtons;
+@@ -527,6 +530,7 @@ class ImageTextField : public Widget
+ 	virtual void setText(const std::string text);
+ 	virtual std::string &getText();
+ 	void setItemImage(CGraphicPtr image);
++	void setCaretPosition(unsigned int position);
+ 	virtual void setPassword(bool flag);
+ };
+ 
 diff --git a/src/tolua/video.pkg b/src/tolua/video.pkg
 index 2bf784906..de76b77e0 100644
 --- a/src/tolua/video.pkg
