@@ -1085,7 +1085,7 @@ index 0ed2cc07..33166d50 100644
    menu.ingame = true
    menu:run(false)
 diff --git a/scripts/menus/network.lua b/scripts/menus/network.lua
-index 3012cf66..519d49ca 100644
+index 3012cf66..13864722 100644
 --- a/scripts/menus/network.lua
 +++ b/scripts/menus/network.lua
 @@ -196,13 +196,31 @@ function RunJoiningGameMenu(optRace, optReady)
@@ -1179,7 +1179,8 @@ index 3012cf66..519d49ca 100644
 +         JoinServer(lanServers[1])
 +      end
 +      -- With several hosts found, the player picks one from the list.
-+    end)
+     end)
+-  menu:addFullButton(_("~!Add server"), "a", 60, 210, function() RunAddServerMenu(); ServerListUpdate() end)
 +  AddButton(_("Co~!nnect"), "n", 1, 0, function()
 +      local selected = serverlist:getSelected()
 +      local selectedserver = selected ~= nil and servers[selected + 1] or nil
@@ -1188,8 +1189,7 @@ index 3012cf66..519d49ca 100644
 +         return
 +      end
 +      JoinServer(selectedserver)
-     end)
--  menu:addFullButton(_("~!Add server"), "a", 60, 210, function() RunAddServerMenu(); ServerListUpdate() end)
++    end)
 +  AddButton(_("~!Add server"), "a", 0, 1, function() RunAddServerMenu(); ServerListUpdate() end)
    -- We need to stop this from loading when there are no servers.
 -  menu:addFullButton(_("~!Edit server"), "a", 60, 240, function()
@@ -1342,7 +1342,7 @@ index 3012cf66..519d49ca 100644
             for i=1,PlayerMax do
                if menu.player_team[i] == dd then
                   ServerSetupState.ServerGameSettings.Presets[i - 1].Team = dd:getSelected() - 1
-@@ -500,102 +622,132 @@ function CreateOnlineLobby(map, numplayers, isserver)
+@@ -500,102 +622,169 @@ function CreateOnlineLobby(map, numplayers, isserver)
                   break
                end
             end
@@ -1560,14 +1560,51 @@ index 3012cf66..519d49ca 100644
 +  end
 +  menu.button_start_game = menu:addBigButton(_("~!Start Game"), "s", rightX + bw + gap, by, start, bw, bh)
 +  menu.button_start_game.callback = start
++  -- A joining player gets Ready where the host has Start Game: a big
++  -- checkbox and text on a dark box the size of that button, so it's easy
++  -- to see and to tap.
 +  menu.checkbox_ready = MakeCheckBox(_("~!Ready"), function(dd)
 +    LocalSetupState.Ready[NetLocalHostsSlot] = bool2int(dd:isMarked())
 +  end)
-+  menu:add(menu.checkbox_ready, rightX + bw + gap + 10, by + math.floor((bh - menu.checkbox_ready:getHeight()) / 2))
++  local box = 30
++  local race = "orc"
++  if (GetPlayerData(GetThisPlayer(), "RaceName") == "human") then
++    race = "human"
++  end
++  local images = "ui/" .. race .. "/widgets/checkbox-"
++  menu.checkbox_ready:setUncheckedNormalImage(StretchedImage(images .. "normal-unselected.png", box, box))
++  menu.checkbox_ready:setUncheckedPressedImage(StretchedImage(images .. "pressed-unselected.png", box, box))
++  menu.checkbox_ready:setCheckedNormalImage(StretchedImage(images .. "normal-selected.png", box, box))
++  menu.checkbox_ready:setCheckedPressedImage(StretchedImage(images .. "pressed-selected.png", box, box))
++  menu.checkbox_ready:setFont(ScaledLargeFont(28))
++  menu.checkbox_ready:adjustSize()
++  if not isserver then
++    local readyBox = Container()
++    readyBox:setOpaque(true)
++    readyBox:setBaseColor(Color(0, 0, 0, 180))
++    readyBox:setSize(bw, bh)
++    menu:add(readyBox, rightX + bw + gap, by)
++    -- A gold frame, 2 pixels wide, around the box.
++    local gold = Color(230, 180, 40)
++    local edge = 2
++    for i, e in ipairs({{0, 0, bw, edge}, {0, bh - edge, bw, edge},
++                        {0, 0, edge, bh}, {bw - edge, 0, edge, bh}}) do
++      local line = Container()
++      line:setOpaque(true)
++      line:setBaseColor(gold)
++      line:setSize(e[3], e[4])
++      readyBox:add(line, e[1], e[2])
++    end
++    readyBox:add(menu.checkbox_ready,
++      math.floor((bw - menu.checkbox_ready:getWidth()) / 2),
++      math.floor((bh - menu.checkbox_ready:getHeight()) / 2))
++  else
++    menu:add(menu.checkbox_ready, rightX + bw + gap + 10, by)
++  end
  
    for i=1,PlayerMax do
       if menu.player_team[i] then
-@@ -615,6 +767,8 @@ function CreateOnlineLobby(map, numplayers, isserver)
+@@ -615,6 +804,8 @@ function CreateOnlineLobby(map, numplayers, isserver)
      end
      menu.checkbox_ready:setVisible(true)
      menu.button_start_game:setVisible(false)
@@ -1576,7 +1613,7 @@ index 3012cf66..519d49ca 100644
      menu.option_fow:setEnabled(false)
      menu.option_terrain:setEnabled(false)
      menu.option_units:setEnabled(false)
-@@ -780,23 +934,55 @@ function RunCreateMultiGameMenu(s)
+@@ -780,23 +971,55 @@ function RunCreateMultiGameMenu(s)
    local description = "No map"
    local mapfile = "maps/skirmish/multiplayer/(2)timeless-isle.smp.gz"
    local playerCount = 1
@@ -1644,7 +1681,7 @@ index 3012cf66..519d49ca 100644
      OldPresentMap(desc, nplayers, w, h, id)
    end
    local oldDefinePlayerTypes = DefinePlayerTypes
-@@ -809,17 +995,27 @@ function RunCreateMultiGameMenu(s)
+@@ -809,17 +1032,27 @@ function RunCreateMultiGameMenu(s)
          playerCount = playerCount + 1
        end
      end
@@ -1677,7 +1714,7 @@ index 3012cf66..519d49ca 100644
    end
    browser:setActionCallback(cb)
  
-@@ -833,9 +1029,8 @@ function RunCreateMultiGameMenu(s)
+@@ -833,9 +1066,8 @@ function RunCreateMultiGameMenu(s)
  
    browser:setDoubleClickAction(createFunc)
  
@@ -1689,7 +1726,7 @@ index 3012cf66..519d49ca 100644
      function() menu:stop() end)
  
    menu:run()
-@@ -843,10 +1038,171 @@ function RunCreateMultiGameMenu(s)
+@@ -843,10 +1075,171 @@ function RunCreateMultiGameMenu(s)
    DefinePlayerTypes = oldDefinePlayerTypes
  end
  
@@ -1862,19 +1899,19 @@ index 3012cf66..519d49ca 100644
  
    local function FixMusic()
      wargus.playlist = { "music/Orc Briefing" .. wargus.music_extension }
-@@ -859,24 +1215,18 @@ function RunMultiPlayerGameMenu(s)
+@@ -859,24 +1252,18 @@ function RunMultiPlayerGameMenu(s)
    InitGameSettings()
    InitNetwork1()
  
 -  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
--
--  menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
 +  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, Video.Width / 2, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
+ 
+-  menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
++  AddMultiPlayerTitle(menu, offx, offy)
  
 -  menu:writeText(_("Nickname :"), 208 + offx, 248 + offy)
 -  local nick = menu:addTextInputField(GetLocalPlayerName(), offx + 298, 244 + offy)
-+  AddMultiPlayerTitle(menu, offx, offy)
- 
+-
 -  menu:writeText(_("Password :"), 208 + offx, 248 + offy + 28)
 -  local pass = menu:addTextInputField("", offx + 298, 244 + offy + 28)
 +  local nick, rowY = AddMultiPlayerField(menu, _("Nickname :"), MultiPlayerNickname(), 208 + offx, 232 + offy)
@@ -1894,7 +1931,7 @@ index 3012cf66..519d49ca 100644
        if string.len(pass:getText()) == 0 then
           ErrorMenu("Please enter your password")
        else
-@@ -885,11 +1235,12 @@ function RunMultiPlayerGameMenu(s)
+@@ -885,11 +1272,12 @@ function RunMultiPlayerGameMenu(s)
           OnlineService.login(nick:getText(), pass:getText())
           RunOnlineMenu()
        end
@@ -1911,7 +1948,7 @@ index 3012cf66..519d49ca 100644
    local signUpCb = function(evt, btn, cnt)
       if evt == "mouseClick" then
  
-@@ -956,30 +1307,25 @@ function RunMultiPlayerGameMenu(s)
+@@ -956,30 +1344,25 @@ function RunMultiPlayerGameMenu(s)
    local signUpListener = LuaActionListener(signUpCb)
    signupLabel:addMouseListener(signUpListener)
  
