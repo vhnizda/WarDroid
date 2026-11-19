@@ -2525,7 +2525,7 @@ index 000000000..cd1e17f17
 +
 +//@}
 diff --git a/src/ui/widgets.cpp b/src/ui/widgets.cpp
-index 4646eaa5c..2429c4735 100644
+index 4646eaa5c..31fdfb642 100644
 --- a/src/ui/widgets.cpp
 +++ b/src/ui/widgets.cpp
 @@ -1559,17 +1559,20 @@ void ImageTextField::draw(gcn::Graphics *graphics) /* override */
@@ -2552,6 +2552,55 @@ index 4646eaa5c..2429c4735 100644
  
  	if (mSelectEndOffset != 0)
  	{
+@@ -1681,19 +1684,24 @@ void ImageListBox::draw(gcn::Graphics *graphics) /* override */
+ 	int i, fontHeight;
+ 	int y = 0;
+ 	CGraphic *img = itemImage.get();
+-	img->Resize(getWidth(), img->getHeight());
+ 
+-	fontHeight = std::max<int>(getFont()->getHeight(), img->getHeight());
++	// Each row is as tall as the font or the bar image, whichever is taller,
++	// and the bar is stretched to fill it, so a big font gets big rows.
++	const int barHeight = img->getHeight();
++	fontHeight = std::max<int>(getFont()->getHeight(), barHeight);
++	img->Resize(getWidth(), fontHeight);
++	// Text in big rows is set in a little from the left edge.
++	const int textX = fontHeight > barHeight ? 4 : 1;
+ 
+ 	/**
+ 	* @todo Check cliprects so we do not have to iterate over elements in the list model
+ 	*/
+ 	for (i = 0; i < mListModel->getNumberOfElements(); ++i) {
+-		graphics->drawImage(img, 0, 0, 0, y, getWidth(), img->getHeight());
++		graphics->drawImage(img, 0, 0, 0, y, getWidth(), fontHeight);
+ 		if (i == mSelected) {
+-			graphics->drawText("~<" + mListModel->getElementAt(i) + "~>", 1, y + (fontHeight - getFont()->getHeight()) / 2);
++			graphics->drawText("~<" + mListModel->getElementAt(i) + "~>", textX, y + (fontHeight - getFont()->getHeight()) / 2);
+ 		} else {
+-			graphics->drawText(mListModel->getElementAt(i), 1, y + (fontHeight - getFont()->getHeight()) / 2);
++			graphics->drawText(mListModel->getElementAt(i), textX, y + (fontHeight - getFont()->getHeight()) / 2);
+ 		}
+ 
+ 		y += fontHeight;
+@@ -2021,11 +2029,14 @@ void ImageListBoxWidget::draw(gcn::Graphics *graphics) /* override */
+ 	}
+ 	gcn::Rectangle rect = getChildrenArea();
+ 	CGraphic *img = itemImage.get();
+-	img->Resize(rect.width, img->getHeight());
++	// The empty rows below the list match the list's rows: as tall as the
++	// font or the bar image, whichever is taller.
++	const int rowHeight = std::max<int>(listbox.getFont()->getHeight(), img->getHeight());
++	img->Resize(rect.width, rowHeight);
+ 	int y = 0;
+-	while (y + img->getHeight() <= rect.height) {
+-		graphics->drawImage(img, 0, 0, 0, y, getWidth(), img->getHeight());
+-		y += img->getHeight();
++	while (y + rowHeight <= rect.height) {
++		graphics->drawImage(img, 0, 0, 0, y, getWidth(), rowHeight);
++		y += rowHeight;
+ 	}
+ 	img->SetOriginalSize();
+ 
 diff --git a/src/unit/script_unittype.cpp b/src/unit/script_unittype.cpp
 index b37a42f21..bfa70f0ba 100644
 --- a/src/unit/script_unittype.cpp

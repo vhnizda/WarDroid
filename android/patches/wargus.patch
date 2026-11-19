@@ -12,10 +12,10 @@ index 689a3674..9ffb2bb2 100644
      
      local gog, bnet, dos, quit
 diff --git a/scripts/guichan.lua b/scripts/guichan.lua
-index b3535f31..3d088238 100644
+index b3535f31..0e962b2c 100644
 --- a/scripts/guichan.lua
 +++ b/scripts/guichan.lua
-@@ -114,6 +114,40 @@ g_hradio_on:Load()
+@@ -114,6 +114,183 @@ g_hradio_on:Load()
  g_hradio_on2 = CGraphic:New("ui/human/widgets/radio-pressed-selected.png")
  g_hradio_on2:Load()
  
@@ -53,10 +53,153 @@ index b3535f31..3d088238 100644
 +  return bigButtonArt[key]
 +end
 +
++-- Touch friendly menus, laid out like the main screen: buttons in the
++-- space below the Warcraft logo and above the version line, in up to two
++-- columns of up to four. The space is a grid of four rows with equal gaps;
++-- buttons fill the rest, and their text is half their height.
++function BigMenuGrid()
++  local grid = {}
++  grid.top = math.floor(Video.Height * 0.33)
++  grid.bottom = Video.Height - 24
++  grid.gapY = 14
++  grid.gapX = math.floor(Video.Width / 16)
++  grid.width = math.floor((Video.Width - 3 * grid.gapX) / 2)
++  grid.height = math.floor((grid.bottom - grid.top - 5 * grid.gapY) / 4)
++  grid.font = ScaledLargeFont(math.floor(grid.height / 2))
++  -- The left edge of column 0 or 1, or of a single centred column.
++  function grid.x(column)
++    if (column == nil) then
++      return math.floor((Video.Width - grid.width) / 2)
++    end
++    return grid.gapX + column * (grid.width + grid.gapX)
++  end
++  -- The top of row 0 to 3, for a block of the given number of rows
++  -- centred in the space.
++  function grid.y(row, rows)
++    local block = rows * grid.height + (rows - 1) * grid.gapY
++    local top = grid.top + math.floor((grid.bottom - grid.top - block) / 2)
++    return top + row * (grid.height + grid.gapY)
++  end
++  return grid
++end
++
++-- Add a big button at a column (nil for centred) and row of the grid.
++function AddBigGridButton(menu, grid, caption, hotkey, column, row, rows, callback)
++  local b = menu:addBigButton(caption, hotkey, grid.x(column), grid.y(row, rows),
++                              callback, grid.width, grid.height)
++  b:setFont(grid.font)
++  return b
++end
++
++-- Add buttons, each {caption, hotkey, callback}. Up to four go in one
++-- centred column; more fill a left column first, then a right one. Buttons
++-- side by side share the same row.
++function AddBigButtonGrid(menu, buttons)
++  local grid = BigMenuGrid()
++  local n = table.getn(buttons)
++  local columns = 1
++  if (n > 4) then
++    columns = 2
++  end
++  local rows = math.ceil(n / columns)
++  if (rows > 4) then
++    -- More than eight buttons: make them shorter so they still fit.
++    grid.height = math.floor((grid.bottom - grid.top - (rows + 1) * grid.gapY) / rows)
++    grid.font = ScaledLargeFont(math.max(17, math.floor(grid.height / 2)))
++  end
++  for i, b in ipairs(buttons) do
++    local column = nil
++    if (columns == 2) then
++      column = math.floor((i - 1) / rows)
++    end
++    AddBigGridButton(menu, grid, b[1], b[2], column, (i - 1) - math.floor((i - 1) / rows) * rows, rows, b[3])
++  end
++  return grid
++end
++
++-- Lists to choose from, made bigger for touch: rows this many pixels high,
++-- in the large font at the same size.
++BigListRowHeight = 28
++
++-- Give a list box big rows. The rows are as wide as the box when the font
++-- is set, so when the list will scroll, narrow them by the scroll bar's
++-- width first; otherwise they don't fit beside the bar and a horizontal
++-- bar appears too.
++function SetBigListFont(list, w, h, scrolls)
++  if (scrolls) then
++    list:setSize(w - list:getScrollbarWidth(), h)
++  end
++  list:setFont(ScaledLargeFont(BigListRowHeight))
++  list:setSize(w, h)
++end
++
++-- An image stretched to w x h, kept so each size is made once. Its own copy,
++-- so stretching it leaves the image elsewhere at its normal size.
++local stretchedImages = {}
++function StretchedImage(file, w, h)
++  local key = file .. "@" .. w .. "x" .. h
++  if (stretchedImages[key] == nil) then
++    local g = CGraphic:ForceNew(file)
++    g:Load()
++    g:Resize(w, h)
++    stretchedImages[key] = g
++  end
++  return stretchedImages[key]
++end
++
++-- A menu shown over the game, with its panel stretched to w x h and
++-- centred on the screen.
++function BigGameMenu(panelImage, w, h)
++  local menu = WarGameMenu(nil)
++  menu:setOpaque(false)
++  menu:add(ImageWidget(StretchedImage(panelImage, w, h)), 0, 0)
++  menu:resize(w, h)
++  return menu
++end
++
++-- A pop up for choosing from a list, made bigger for touch: the panel
++-- stretched to w x h and centred on the screen.
++function BigListPopup(panelImage, w, h)
++  local menu = WarMenu(nil, panelImage, {w, h})
++  menu:setDrawMenusUnder(true)
++  return menu
++end
++
++-- A big pop up's layout: its title at the top, the list below it, and a
++-- pair of buttons along the bottom. It shows up to 9 rows, fewer if the
++-- screen is too short for that.
++BigPopupWidth = 560
++BigPopupListY = 50
++local bigPopupChrome = BigPopupListY + 18 + 40 + 24 -- title, gap, buttons, margin
++function BigPopupRows()
++  return math.max(4, math.min(9, math.floor((Video.Height - 40 - bigPopupChrome) / BigListRowHeight)))
++end
++function BigPopupSize(rows)
++  return BigPopupWidth, bigPopupChrome + rows * BigListRowHeight
++end
++
++-- The OK and Cancel style pair of buttons along a big pop up's bottom.
++BigPopupButtonHeight = 40
++function AddBigPopupButtons(menu, w, h, left, right)
++  local gap = 24
++  local bw = math.floor((w - 3 * gap) / 2)
++  local y = h - gap - BigPopupButtonHeight
++  local a = menu:addBigButton(left[1], left[2], gap, y, left[3], bw, BigPopupButtonHeight)
++  local b = menu:addBigButton(right[1], right[2], 2 * gap + bw, y, right[3], bw, BigPopupButtonHeight)
++  return a, b
++end
++
++-- A menu's title, at the top right beside the Warcraft logo, as on the
++-- Multiplayer screen.
++function AddBigMenuTitle(menu, title)
++  local grid = BigMenuGrid()
++  return menu:addLabel(title, grid.x(1) + grid.width / 2, math.floor(Video.Height * 0.09), LargeFont130())
++end
++
  -- original continue button for the campaign, chapter and victory/defeat screens
  g_continue_n = CGraphic:New("ui/human/widgets/button-grayscale-normal.png")
  g_continue_n:Load()
-@@ -370,7 +404,27 @@ end
+@@ -370,7 +547,27 @@ end
  	b:setBorderSize(0)
      return b
    end
@@ -85,16 +228,97 @@ index b3535f31..3d088238 100644
    function menu:addContinueButton(caption, hotkey, x, y, callback)
      local b = self:addImageButton(caption, hotkey, x, y, callback)
      b:setNormalImage(g_continue_n)
-@@ -1094,7 +1148,7 @@ function RunSinglePlayerTypeMenu()
+@@ -659,6 +856,14 @@ end
+     return bq
+   end
+ 
++  -- A browser with big rows for touch, showing the given number of rows.
++  function menu:addBigBrowser(path, filter, x, y, w, rows, default, relative)
++    local h = rows * BigListRowHeight
++    local bq = self:addBrowser(path, filter, x, y, w, h, default, relative)
++    SetBigListFont(bq, w, h, table.getn(bq.itemslist) > rows)
++    return bq
++  end
++
+   function menu:addCheckBox(caption, x, y, callback) --my new function
+ 	local b = ImageCheckBox(caption)
+     b:setBaseColor(clear)
+@@ -1092,33 +1297,42 @@ function RunSinglePlayerTypeMenu()
+ 
+   local menu = WarMenu()
    local offx = (Video.Width - 640) / 2
-   local offy = (Video.Height - 480) / 2
+-  local offy = (Video.Height - 480) / 2
  
 -  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
+-  menu:addLabel(_("~<Single Player~>"), offx + 320, offy + 212 - 25)
+-
+-  menu:addFullButton(_("~!Standard Game"), "s", offx + 208, offy + 104 + 36*3,
+-    function() RunSinglePlayerGameModeMenu(); menu:stop(1) end)
+-  menu:addFullButton(_("~!Campaign Game"), "c", offx + 208, offy + 104 + 36*4,
+-    function() RunModCampaignGameMenu(); menu:stop(1) end)
+-  menu:addFullButton(_("~!Load Game"), "l", offx + 208, offy + 104 + 36*5,
+-    function() RunLoadGameMenu(); menu:stop(1) end)
+-  menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", offx + 208, offy + 104 + 36*6,
+-    function() menu:stop() end)
 +  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
-   menu:addLabel(_("~<Single Player~>"), offx + 320, offy + 212 - 25)
++  AddBigMenuTitle(menu, _("~<Single Player~>"))
++
++  AddBigButtonGrid(menu, {
++    {_("~!Standard Game"), "s",
++      function() RunSinglePlayerGameModeMenu(); menu:stop(1) end},
++    {_("~!Campaign Game"), "c",
++      function()
++        -- Previous Menu there comes back here, to Single Player.
++        if (RunModCampaignGameMenu() ~= CampaignMenuPrevious) then
++          menu:stop(1)
++        end
++      end},
++    {_("~!Load Game"), "l",
++      function()
++        -- Cancel there comes back here, to Single Player.
++        if (RunLoadGameMenu() ~= 1) then
++          menu:stop(1)
++        end
++      end},
++    {_("Previous Menu (~<Esc~>)"), "escape",
++      function() menu:stop() end}})
+   return menu:run()
+ end
  
-   menu:addFullButton(_("~!Standard Game"), "s", offx + 208, offy + 104 + 36*3,
-@@ -1179,7 +1233,7 @@ function RunSinglePlayerGameMenu()
+ function RunSinglePlayerGameModeMenu()
+ 
+   buttonStatut = 0
+-  local menu = WarMenu(nil, panel(5), false)
+-  menu:setSize(352, 352)
+-  menu:setPosition((Video.Width - 352) / 2, (Video.Height - 352) / 2)
+-  menu:setDrawMenusUnder(true)
++  local rows = BigPopupRows()
++  local w, h = BigPopupSize(rows)
++  local menu = BigListPopup(panel(5), w, h)
+ 
+-  menu:addLabel(_("Standard Game"), 176, 8)
++  menu:addLabel(_("Standard Game"), w / 2, 14, LargeFont130())
+ 
+-  local browser = menu:addBrowser("scripts/lists/maps/", "", 24, (24+8+8), (300+5), (318-24-8-8-24), "Skirmish Modern", true)
++  local browser = menu:addBigBrowser("scripts/lists/maps/", "", 24, BigPopupListY, w - 48, rows, "Skirmish Modern", true)
+ 
+   local okFunc = function()
+      if (browser:getSelected() < 0) then
+@@ -1130,9 +1344,10 @@ function RunSinglePlayerGameModeMenu()
+ 
+   browser:setDoubleClickAction(okFunc)
+ 
+-  menu:addHalfButton("~!OK", "o", 48, 318, okFunc)
+-  menu:addHalfButton(_("~!Cancel"), "c", 198, 318,
+-    function() buttonStatut = 2; menu:stop(1); RunSinglePlayerTypeMenu() end)
++  AddBigPopupButtons(menu, w, h,
++    {"~!OK", "o", okFunc},
++    {_("~!Cancel"), "c",
++      function() buttonStatut = 2; menu:stop(1); RunSinglePlayerTypeMenu() end})
+ 
+   menu:run()
+ 
+@@ -1179,7 +1394,7 @@ function RunSinglePlayerGameMenu()
    -- Logo
    menu:addLabel(_("~<Single Player Game Setup~>"), offx + 640/2 + 12, offy + 35)
    -- Copyright information.
@@ -103,7 +327,7 @@ index b3535f31..3d088238 100644
    
    -- Error handling function
    function ErrorMessage(errmsg)
-@@ -1606,23 +1660,44 @@ function BuildProgramStartMenu()
+@@ -1606,24 +1821,24 @@ function BuildProgramStartMenu()
    local offx = (Video.Width - 640) / 2
    local offy = (Video.Height - 480) / 2
    
@@ -111,54 +335,152 @@ index b3535f31..3d088238 100644
 +  menu:addLabel(wargus.Name .. _(" V") .. wargus.Version .. " - " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
    
 -  menu:addFullButton(_("~!Single Player Game"), "s", offx + 208, offy + 104 + 36*0,
-+  -- Two columns of four buttons, below the Warcraft logo and above the
-+  -- version line. The gaps between and around them are fixed and equal,
-+  -- and the buttons grow to fill the rest. Buttons side by side share the
-+  -- same top and height, so each row lines up.
-+  local top = math.floor(Video.Height * 0.33)
-+  local bottom = Video.Height - 24
-+  local gapY = 14
-+  local gapX = math.floor(Video.Width / 16)
-+  local bw = math.floor((Video.Width - 3 * gapX) / 2)
-+  local bh = math.floor((bottom - top - 5 * gapY) / 4)
-+  local function ButtonX(column)
-+    return gapX + column * (bw + gapX)
-+  end
-+  local function ButtonY(row)
-+    return top + gapY + row * (bh + gapY)
-+  end
-+  local function AddMainButton(caption, hotkey, column, row, callback)
-+    local b = menu:addBigButton(caption, hotkey, ButtonX(column), ButtonY(row), callback, bw, bh)
-+    -- Text half the button's height, so it fills the button.
-+    b:setFont(ScaledLargeFont(math.floor(bh / 2)))
-+  end
-+
-+  AddMainButton(_("~!Single Player Game"), "s", 0, 0,
-     function() RunSinglePlayerTypeMenu(); menu:stop(1) end)
+-    function() RunSinglePlayerTypeMenu(); menu:stop(1) end)
 -  menu:addFullButton(_("~!Multi Player Game"), "m", offx + 208, offy + 104 + 36*1,
 -                     function() RunMultiPlayerGameMenu(); menu:stop(1) end)
 -  menu:addFullButton(_("~!Replay Game"), "r", offx + 208, offy + 104 + 36*2,
-+  AddMainButton(_("~!Multi Player Game"), "m", 0, 1,
-+    function() RunMultiPlayerGameMenu(); menu:stop(1) end)
-+  AddMainButton(_("~!Replay Game"), "r", 0, 2,
-     function() RunReplayGameMenu(); menu:stop(1) end)
+-    function() RunReplayGameMenu(); menu:stop(1) end)
 -  menu:addFullButton(_("~!Options"), "o", offx + 208, offy + 104 + 36*3,
-+  AddMainButton(_("~!Options"), "o", 0, 3,
-     function() RunOptionsSubMenu(); menu:stop(1) end)
+-    function() RunOptionsSubMenu(); menu:stop(1) end)
 -  menu:addFullButton(_("~!Load Mod"), "l", offx + 208, offy + 104 + 36*4,
-+  AddMainButton(_("~!Load Mod"), "l", 1, 0,
-     function() RunLoadModMenu(); menu:stop(1) end)
+-    function() RunLoadModMenu(); menu:stop(1) end)
 -  menu:addFullButton(_("Map ~!Editor"), "e", offx + 208, offy + 104 + 36*5,
-+  AddMainButton(_("Map ~!Editor"), "e", 1, 1,
-     function() RunEditorMenu(); menu:stop(1) end)
+-    function() RunEditorMenu(); menu:stop(1) end)
 -  menu:addFullButton(_("S~!how Credits"), "h", offx + 208, offy + 104 + 36*6, RunShowCreditsMenu)
 -
 -  menu:addFullButton(_("E~!xit Program"), "x", offx + 208, offy + 104 + 36*7,
-+  AddMainButton(_("S~!how Credits"), "h", 1, 2, RunShowCreditsMenu)
-+  AddMainButton(_("E~!xit Program"), "x", 1, 3,
-     function() menu:stop() end)
+-    function() menu:stop() end)
++  AddBigButtonGrid(menu, {
++    {_("~!Single Player Game"), "s",
++      function() RunSinglePlayerTypeMenu(); menu:stop(1) end},
++    {_("~!Multi Player Game"), "m",
++      function() RunMultiPlayerGameMenu(); menu:stop(1) end},
++    {_("~!Replay Game"), "r",
++      function() RunReplayGameMenu(); menu:stop(1) end},
++    {_("~!Options"), "o",
++      function() RunOptionsSubMenu(); menu:stop(1) end},
++    {_("~!Load Mod"), "l",
++      function() RunLoadModMenu(); menu:stop(1) end},
++    {_("Map ~!Editor"), "e",
++      function() RunEditorMenu(); menu:stop(1) end},
++    {_("S~!how Credits"), "h", RunShowCreditsMenu},
++    {_("E~!xit Program"), "x",
++      function() menu:stop() end}})
  
    local time = 0
+   function checkRunDemo()
+@@ -1683,29 +1898,35 @@ function RunLoadModMenu()
+   menu:run()
+ end
+ 
++-- What the campaign menu returns when the player leaves with Previous Menu.
++CampaignMenuPrevious = 2
++
++-- Returns CampaignMenuPrevious if the player left with Previous Menu.
+ function RunModCampaignGameMenu()
+   local menu = WarMenu()
+-  local offx = (Video.Width - 640) / 2
+-  local offy = (Video.Height - 480) / 2
+ 
+   local path = "scripts/lists/campaigns/"
+   local campaignList = ListFilesInDirectory(path, true)
+-  local lastCampaign = 0
+   local currentPrefix = nil
+   local usedAccellerators = {}
+ 
++  -- Each campaign's buttons, such as Alliance and Horde, under its name,
++  -- and all buttons with their full names in case they don't fit that way.
++  local groups = {}
++  local all = {}
++  local grouped = true
++
+   for i,f in ipairs(campaignList) do
+      local prefix = string.match(f, "^([%w%s]+%w)")
+      local btn = string.match(f, "%(([%w%s]+%w)%)$")
+      if btn and prefix then
+         if prefix ~= currentPrefix then
+            currentPrefix = prefix
+-           local label = menu:addLabel(currentPrefix, Video.Width / 2, offy + 104 + 36*lastCampaign)
+-           label:setAlignment(MultiLineLabel.CENTER)
+-           lastCampaign = lastCampaign + 0.5
++           table.insert(groups, {name = prefix, buttons = {}})
+         end
+      else
+         btn = f
++        grouped = false
+      end
+      local accell = ""
+      for idx=1,#btn do
+@@ -1725,17 +1946,61 @@ function RunModCampaignGameMenu()
+            accell = ""
+         end
+      end
+-     menu:addFullButton(btn, accell, offx + 208, offy + 104 + 36*lastCampaign, function()
+-                           Load(path .. f)
+-                           menu:stop()
+-     end)
+-     lastCampaign = lastCampaign + 1
++     local start = function()
++        -- The campaign's file opens its mission list; Previous Menu there
++        -- comes back here, to this menu, rather than closing it.
++        CampaignSubmenuFromChooser = true
++        CampaignSubmenuCancelled = false
++        Load(path .. f)
++        CampaignSubmenuFromChooser = false
++        if (CampaignSubmenuCancelled) then
++           CampaignSubmenuCancelled = false
++           return
++        end
++        menu:stop()
++     end
++     if (grouped) then
++        table.insert(groups[table.getn(groups)].buttons, {btn, accell, start})
++        table.insert(all, {prefix .. " (" .. btn .. ")", accell, start})
++     else
++        table.insert(all, {btn, accell, start})
++     end
+   end
+ 
+-  menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", offx + 208, offy + 104 + 36*(lastCampaign + 2),
+-    function() menu:stop() end)
++  local previous = {_("Previous Menu (~<Esc~>)"), "escape",
++                    function() menu:stop(CampaignMenuPrevious) end}
++
++  -- Up to two campaigns of up to two buttons each: a column per campaign,
++  -- its name on the top row, its buttons below, and Previous Menu centred
++  -- on the bottom row. Otherwise, all the buttons in the usual grid.
++  local count = table.getn(groups)
++  local fitsColumns = grouped and count >= 1 and count <= 2
++  for i, g in ipairs(groups) do
++     if (table.getn(g.buttons) > 2) then
++        fitsColumns = false
++     end
++  end
++  if (fitsColumns) then
++     local grid = BigMenuGrid()
++     for i, g in ipairs(groups) do
++        local column = i - 1
++        if (count == 1) then
++           column = nil
++        end
++        -- The 130% large font's glyphs are 22 pixels high.
++        menu:addLabel(g.name, grid.x(column) + grid.width / 2,
++                      grid.y(0, 4) + math.floor((grid.height - 22) / 2), LargeFont130())
++        for row, b in ipairs(g.buttons) do
++           AddBigGridButton(menu, grid, b[1], b[2], column, row, 4, b[3])
++        end
++     end
++     AddBigGridButton(menu, grid, previous[1], previous[2], nil, 3, 4, previous[3])
++  else
++     table.insert(all, previous)
++     AddBigButtonGrid(menu, all)
++  end
+ 
+-  menu:run()
++  return menu:run()
+ end
+ 
+ Load("scripts/menus/campaign.lua")
 diff --git a/scripts/human/ui_pandora.lua b/scripts/human/ui_pandora.lua
 index 74c9af36..bac78137 100644
 --- a/scripts/human/ui_pandora.lua
@@ -262,7 +584,7 @@ index 503ff66e..8e1e8e91 100644
    menu:addLabel(_("Scenario:"), offx + 16, offy + 360, Fonts["game"], false)
    mapl = menu:addLabel(string.sub(mapname, 6), offx + 16, offy + 360 + 24, Fonts["game"], false)
 diff --git a/scripts/lists/mods/Wargus-Coop-4 b/scripts/lists/mods/Wargus-Coop-4
-index f90a139b..57a806b1 100644
+index f90a139b..cc765a0b 100644
 --- a/scripts/lists/mods/Wargus-Coop-4
 +++ b/scripts/lists/mods/Wargus-Coop-4
 @@ -96,8 +96,8 @@ end
@@ -275,7 +597,7 @@ index f90a139b..57a806b1 100644
  
    local function FixMusic()
      wargus.playlist = { "music/Orc Briefing" .. wargus.music_extension }
-@@ -110,30 +110,21 @@ function RunMultiPlayerGameMenu(s)
+@@ -110,37 +110,31 @@ function RunMultiPlayerGameMenu(s)
    InitGameSettings()
    InitNetwork1()
  
@@ -287,9 +609,11 @@ index f90a139b..57a806b1 100644
  
 -  menu:writeText(_("Nickname :"), 208 + offx, 248 + offy)
 -  local nick = menu:addTextInputField(GetLocalPlayerName(), offx + 298, 244 + offy)
-+  local nick = AddMultiPlayerField(menu, _("Nickname :"), MultiPlayerNickname(), 208 + offx, 232 + offy)
++  local nick, rowY = AddMultiPlayerField(menu, _("Nickname :"), MultiPlayerNickname(), 208 + offx, 232 + offy)
  
-   menu:addFullButton(_("~!Join Co-op"), "j", 208 + offx, 298 + (36 * 2) + offy,
+-  menu:addFullButton(_("~!Join Co-op"), "j", 208 + offx, 298 + (36 * 2) + offy,
++  local ys = MultiPlayerButtonYs(rowY, 3)
++  AddMultiPlayerButton(menu, _("~!Join Co-op"), "j", ys[1],
      function()
 -      if nick:getText() ~= GetLocalPlayerName() then
 -        SetLocalPlayerName(nick:getText())
@@ -300,7 +624,8 @@ index f90a139b..57a806b1 100644
        RunJoinIpMenu()
        FixMusic()
      end)
-   menu:addFullButton(_("Host ~!Co-op"), "c", 208 + offx, 298 + (36 * 3) + offy,
+-  menu:addFullButton(_("Host ~!Co-op"), "c", 208 + offx, 298 + (36 * 3) + offy,
++  AddMultiPlayerButton(menu, _("Host ~!Co-op"), "c", ys[2],
      function()
 -      if nick:getText() ~= GetLocalPlayerName() then
 -        SetLocalPlayerName(nick:getText())
@@ -311,8 +636,9 @@ index f90a139b..57a806b1 100644
        RunModCampaignGameMenu()
        FixMusic()
      end)
-@@ -141,6 +132,8 @@ function RunMultiPlayerGameMenu(s)
-   menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", 208 + offx, 298 + (36 * 5) + offy,
+ 
+-  menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", 208 + offx, 298 + (36 * 5) + offy,
++  AddMultiPlayerButton(menu, _("Previous Menu (~<Esc~>)"), "escape", ys[3],
      function() menu:stop() end)
  
 +  AddMultiPlayerKeyboard(menu, 230 + offy, {nick})
@@ -321,7 +647,7 @@ index f90a139b..57a806b1 100644
  
    ExitNetwork1()
 diff --git a/scripts/menus/campaign.lua b/scripts/menus/campaign.lua
-index 216f4d0f..1d673e0f 100644
+index 216f4d0f..b1d2fad0 100644
 --- a/scripts/menus/campaign.lua
 +++ b/scripts/menus/campaign.lua
 @@ -34,6 +34,10 @@ function Briefing(title, objs, bg, text, voices)
@@ -343,9 +669,84 @@ index 216f4d0f..1d673e0f 100644
  end
  
  function GetCampaignState(campaign)
-@@ -337,7 +342,7 @@ function RunCampaignSubmenu(campaign)
-   menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", offx + 208, offy + 212 + (36 * 6),
-     function()  menu:stop(1); RunSinglePlayerTypeMenu(); currentCampaign = nil; currentState = nil; end)
+@@ -310,34 +315,68 @@ function RunCampaignSubmenu(campaign)
+ 
+   local menu = WarMenu()
+   local offx = (Video.Width - 640) / 2
+-  local offy = (Video.Height - 480) / 2
+   local difficulty_types = {_("Easy"), _("Normal"), _("Hard"),_("Nightmare"),_("Hell")}
+-  
+-  menu:addLabel(_("~<Mission list~>"), offx + 640/2 + 12, offy + 45)
++
++  -- Laid out for touch on the main screen's grid: the title and AI
++  -- difficulty at the top right beside the Warcraft logo, the missions in a
++  -- list with big rows across the top three rows of the grid, and Start
++  -- mission and Previous Menu along the bottom row.
++  local grid = BigMenuGrid()
++  local rightX = grid.x(1)
++  AddBigMenuTitle(menu, _("~<Mission list~>"))
++
++  local ddWidth = 200
++  -- A dropdown folds back up to its font's height after a pick, so it's
++  -- exactly that tall from the start.
++  local ddHeight = 26
++  local labelY = math.floor(Video.Height * 0.20)
++  local label = Label(_("~<AI Difficulty:~>"))
++  label:setFont(LargeFont130())
++  label:adjustSize()
++  local labelX = rightX + math.floor((grid.width - label:getWidth() - 12 - ddWidth) / 2)
++  menu:add(label, labelX, labelY + math.floor((ddHeight - 22) / 2))
++  difficulty = menu:addDropDown(difficulty_types, labelX + label:getWidth() + 12, labelY,
++    function(dd) end)
++  difficulty:setFont(ScaledLargeFont(ddHeight))
++  difficulty:setSize(ddWidth, ddHeight)
++  difficulty:setSelected(1)
+ 
+   local missionList = {}
+   for i = 1, GetCampaignState(campaign) do
+ 	missionList[i] = CampaignButtonTitle(i)
+   end
+-  local missionListBox = menu:addImageListBox(offx + 80, offy + 100, 480, 250, missionList)
++  local listTop = grid.y(0, 4)
++  local listSpace = grid.y(3, 4) - grid.gapY - listTop
++  local rows = math.floor(listSpace / BigListRowHeight)
++  local listW = Video.Width - 2 * grid.gapX
++  local listH = rows * BigListRowHeight
++  local missionListBox = menu:addImageListBox(grid.gapX, listTop + math.floor((listSpace - listH) / 2), listW, listH, missionList)
++  SetBigListFont(missionListBox, listW, listH, #missionList > rows)
+   missionListBox:setSelected(#missionList - 1)
+-  menu:addLabel(_("~<AI Difficulty:~>"), offx + 80, offy + 214 + (36 * 4), Fonts["game"], false)
+-  difficulty = menu:addDropDown(difficulty_types, offx + 200, offy + 212 + (36 * 4),
+-    function(dd) end)
+-  difficulty:setSize(170, 20)
+-  difficulty:setSelected(1)
+ 
+-  local goButton = menu:addFullButton(_("~!Start mission"), "s", offx + 208, offy + 212 + (36 * 5),  
+-			function() 
++  local goButton = AddBigGridButton(menu, grid, _("~!Start mission"), "s", 0, 3, 4,
++			function()
+ 				GameSettings.Difficulty = difficulty:getSelected() + 1
+ 				wc2.preferences.LastDifficulty = GameSettings.Difficulty
+ 				SavePreferences()
+-				return CampaignButtonFunction(campaign, missionListBox:getSelected() + 1, menu) 
++				return CampaignButtonFunction(campaign, missionListBox:getSelected() + 1, menu)
+ 			end)
+-  menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", offx + 208, offy + 212 + (36 * 6),
+-    function()  menu:stop(1); RunSinglePlayerTypeMenu(); currentCampaign = nil; currentState = nil; end)
++  -- Opened from the campaign menu, Previous Menu goes back there; opened
++  -- after a mission, it goes to Single Player.
++  local fromChooser = CampaignSubmenuFromChooser
++  CampaignSubmenuFromChooser = false
++  AddBigGridButton(menu, grid, _("Previous Menu (~<Esc~>)"), "escape", 1, 3, 4,
++    function()
++      currentCampaign = nil; currentState = nil
++      if (fromChooser) then
++        CampaignSubmenuCancelled = true
++        menu:stop(1)
++      else
++        menu:stop(1); RunSinglePlayerTypeMenu()
++      end
++    end)
  
 -  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
 +  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
@@ -401,6 +802,67 @@ index 657575ea..ac5ee53a 100644
    
    menu:addLabel(_("~<Map Editor~>"), offx + 320, offy + 212 - 25)
    local buttonNewMap =
+diff --git a/scripts/menus/game.lua b/scripts/menus/game.lua
+index ff060778..03e223bb 100644
+--- a/scripts/menus/game.lua
++++ b/scripts/menus/game.lua
+@@ -31,25 +31,38 @@ end
+ 
+ 
+ 
++-- WarDroid: the game menu is bigger for touch, with big buttons and text,
++-- but no taller than the screen allows.
+ function RunGameMenu()
+-  local menu = WarGameMenu(panel(1))
+-
+-  menu:addLabel(_("Game Menu"), 128, 11)
+-
+-  menu:addHalfButton(_("Save (~<F11~>)"), "f11", 16, 40,
+-    function() RunSaveMenu() end)
+-  menu:addHalfButton(_("Load (~<F12~>)"), "f12", 16 + 12 + 106, 40,
+-    function() RunGameLoadGameMenu() end)
+-  menu:addFullButton(_("Options (~<F5~>)"), "f5", 16, 40 + 36*1,
+-    function() RunGameOptionsMenu() end)
+-  menu:addFullButton(_("Help (~<F1~>)"), "f1", 16, 40 + 36*2,
+-    function() RunHelpMenu() end)
+-  menu:addFullButton(_("Scenario ~!Objectives"), "o", 16, 40 + 36*3,
+-    function() RunObjectivesMenu() end)
+-  menu:addFullButton(_("~!End Scenario"), "e", 16, 40 + 36*4,
+-    function() RunEndScenarioMenu() end)
+-  menu:addFullButton(_("Return to Game (~<Esc~>)"), "escape", 16, 288 - 40,
+-    function() menu:stop() end)
++  local margin = 20
++  local gap = 10
++  local bh = 44
++  local w = 400
++  local h = math.min(420, Video.Height - 20)
++  local menu = BigGameMenu(panel(1), w, h)
++  local bw = w - 2 * margin
++  local half = math.floor((bw - gap) / 2)
++  -- Rows of buttons below the title; Return to Game sits at the bottom.
++  local top = 50
++  local step = math.min(bh + gap, math.floor((h - margin - bh - top) / 5))
++  local function Y(row) return top + row * step end
++
++  menu:addLabel(_("Game Menu"), w / 2, 14, LargeFont130())
++
++  menu:addBigButton(_("Save (~<F11~>)"), "f11", margin, Y(0),
++    function() RunSaveMenu() end, half, bh)
++  menu:addBigButton(_("Load (~<F12~>)"), "f12", margin + half + gap, Y(0),
++    function() RunGameLoadGameMenu() end, half, bh)
++  menu:addBigButton(_("Options (~<F5~>)"), "f5", margin, Y(1),
++    function() RunGameOptionsMenu() end, bw, bh)
++  menu:addBigButton(_("Help (~<F1~>)"), "f1", margin, Y(2),
++    function() RunHelpMenu() end, bw, bh)
++  menu:addBigButton(_("Scenario ~!Objectives"), "o", margin, Y(3),
++    function() RunObjectivesMenu() end, bw, bh)
++  menu:addBigButton(_("~!End Scenario"), "e", margin, Y(4),
++    function() RunEndScenarioMenu() end, bw, bh)
++  menu:addBigButton(_("Return to Game (~<Esc~>)"), "escape", margin, h - margin - bh,
++    function() menu:stop() end, bw, bh)
+ 
+   menu:run(false)
+ end
 diff --git a/scripts/menus/help.lua b/scripts/menus/help.lua
 index 658d10d1..1355ef27 100644
 --- a/scripts/menus/help.lua
@@ -548,19 +1010,122 @@ index 658d10d1..1355ef27 100644
  
    menu:run(false)
  end
+diff --git a/scripts/menus/load.lua b/scripts/menus/load.lua
+index 0ed2cc07..33166d50 100644
+--- a/scripts/menus/load.lua
++++ b/scripts/menus/load.lua
+@@ -36,10 +36,18 @@ function LoadGame(s)
+   end
+ end
+ 
+-function AddLoadGameItems(menu)
+-  menu:addLabel(_("Load Game"), 384 / 2, 11)
+-  local browser = menu:addBrowser("~save", "^.*%.sav%.?g?z?$",
+-                                  (384 - 300 - 18) / 2, 11 + (36 * 1.5), 318, 126)
++-- With big, the pop up is w x h with big rows and buttons for touch;
++-- otherwise it's Wargus's 384 x 256.
++function AddLoadGameItems(menu, big, w, h, rows)
++  local browser
++  if (big) then
++    menu:addLabel(_("Load Game"), w / 2, 14, LargeFont130())
++    browser = menu:addBigBrowser("~save", "^.*%.sav%.?g?z?$", 24, BigPopupListY, w - 48, rows)
++  else
++    menu:addLabel(_("Load Game"), 384 / 2, 11)
++    browser = menu:addBrowser("~save", "^.*%.sav%.?g?z?$",
++                              (384 - 300 - 18) / 2, 11 + (36 * 1.5), 318, 126)
++  end
+ 
+   local loadFunc = function()
+      if (browser:getSelected() < 0) then
+@@ -57,29 +65,36 @@ function AddLoadGameItems(menu)
+   browser:setDoubleClickAction(loadFunc)
+   browser:requestFocus()
+ 
++  if (big) then
++    AddBigPopupButtons(menu, w, h,
++      {_("~!Load"), "l", loadFunc},
++      {_("Cancel (~<Esc~>)"), "escape", function() menu:stop(1); end})
++    return
++  end
+   menu:addHalfButton(_("~!Load"), "l", (384 - 300 - 18) / 2, 256 - 16 - 27, loadFunc)
+   menu:addHalfButton(_("Cancel (~<Esc~>)"), "escape", 384 - ((384 - 300 - 18) / 2) - 106, 256 - 16 - 27,
+     function() menu:stop(1); end)
+ end
+ 
+ function RunLoadGameMenu()
+-  local menu = WarMenu(nil, panel(3), false)
+-  menu:setSize(384, 256)
+-  menu:setPosition((Video.Width - 384) / 2, (Video.Height - 256) / 2)
+-  menu:setDrawMenusUnder(true)
++  local rows = BigPopupRows()
++  local w, h = BigPopupSize(rows)
++  local menu = BigListPopup(panel(3), w, h)
+ 
+-  AddLoadGameItems(menu)
++  AddLoadGameItems(menu, true, w, h, rows)
+ 
+   menu.ingame = false
+-  menu:run()
++  -- 1 if the player cancelled.
++  return menu:run()
+ end
+ 
+ function RunGameLoadGameMenu()
+-  local menu = WarGameMenu(panel(3))
+-  menu:resize(384, 256)
+-  menu:setDrawMenusUnder(true)
++  -- The same big pop up as Load Game from the Single Player menu.
++  local rows = BigPopupRows()
++  local w, h = BigPopupSize(rows)
++  local menu = BigGameMenu(panel(3), w, h)
+ 
+-  AddLoadGameItems(menu)
++  AddLoadGameItems(menu, true, w, h, rows)
+ 
+   menu.ingame = true
+   menu:run(false)
 diff --git a/scripts/menus/network.lua b/scripts/menus/network.lua
-index 3012cf66..6396beec 100644
+index 3012cf66..519d49ca 100644
 --- a/scripts/menus/network.lua
 +++ b/scripts/menus/network.lua
-@@ -203,6 +203,7 @@ function RunJoinIpMenu()
-   menu:setDrawMenusUnder(true)
-   menu:addLabel(_("Servers: "), 176, 20)
+@@ -196,13 +196,31 @@ function RunJoiningGameMenu(optRace, optReady)
+ end
+ 
+ function RunJoinIpMenu()
+-  local menu = WarMenu(nil, panel(5), false)
++  -- WarDroid: a big pop up for touch. The servers fill a list of big rows
++  -- across the top, and the six buttons sit below it in two columns.
++  local w = math.min(720, Video.Width - 40)
++  local h = math.min(456, Video.Height - 20)
++  local menu = BigListPopup(panel(5), w, h)
+   local serverlist = nil
+-  menu:setSize(352, 352)
+-  menu:setPosition((Video.Width - 352) / 2, (Video.Height - 352) / 2)
+-  menu:setDrawMenusUnder(true)
+-  menu:addLabel(_("Servers: "), 176, 20)
++  local margin = 24
++  local listY = 50
++  local listW = w - 2 * margin
++  local bh = 44
++  local gap = 12
++  local buttonsTop = h - margin - 3 * bh - 2 * gap
++  local rows = math.floor((buttonsTop - 12 - listY) / BigListRowHeight)
++  local listH = rows * BigListRowHeight
++  local bw = math.floor((listW - gap) / 2)
++  local function ButtonAt(column, row)
++    return margin + column * (bw + gap), buttonsTop + row * (bh + gap)
++  end
++  local function AddButton(caption, hotkey, column, row, callback)
++    local x, y = ButtonAt(column, row)
++    return menu:addBigButton(caption, hotkey, x, y, callback, bw, bh)
++  end
++  menu:addLabel(_("Servers: "), w / 2, 14, LargeFont130())
    local servers = {}
 +  local lanServers = {}
    local function ServerListUpdate()
      servers = {}
      if (wc2.preferences.ServerList ~= nil) then
-@@ -210,28 +211,26 @@ function RunJoinIpMenu()
+@@ -210,28 +228,28 @@ function RunJoinIpMenu()
          servers[i]=tostring(wc2.preferences.ServerList[(i-1)*2+1].." | "..tostring(wc2.preferences.ServerList[(i-1)*2+2]))
        end
      end
@@ -573,10 +1138,12 @@ index 3012cf66..6396beec 100644
      end
      if serverlist == nil then
 -       serverlist = menu:addImageListBox(20, 50, 300, 120, servers)
-+       serverlist = menu:addImageListBox(20, 50, 300, 90, servers)
++       serverlist = menu:addImageListBox(margin, listY, listW, listH, servers)
      else
         serverlist:setList(servers)
      end
++    -- Big rows, narrowed beside the scroll bar when the list scrolls.
++    SetBigListFont(serverlist, listW, listH, table.getn(servers) > rows)
    end
    ServerListUpdate()
 -  menu:addFullButton(_("Co~!nnect"), "n", 60, 180, function()
@@ -598,12 +1165,12 @@ index 3012cf66..6396beec 100644
           ErrorMenu(_("Invalid server name"))
           return
        end
-@@ -240,6 +239,25 @@ function RunJoinIpMenu()
+@@ -240,15 +258,34 @@ function RunJoinIpMenu()
           -- connect failed, don't leave this menu
           return
        end
 +  end
-+  menu:addFullButton(_("~!Search LAN"), "s", 60, 150, function()
++  AddButton(_("~!Search LAN"), "s", 0, 0, function()
 +      lanServers = NetworkScanLan()
 +      ServerListUpdate()
 +      if #lanServers == 0 then
@@ -613,7 +1180,7 @@ index 3012cf66..6396beec 100644
 +      end
 +      -- With several hosts found, the player picks one from the list.
 +    end)
-+  menu:addFullButton(_("Co~!nnect"), "n", 60, 180, function()
++  AddButton(_("Co~!nnect"), "n", 1, 0, function()
 +      local selected = serverlist:getSelected()
 +      local selectedserver = selected ~= nil and servers[selected + 1] or nil
 +      if selectedserver == nil or string.match(selectedserver, "^[0-9%.]+") == nil then
@@ -622,9 +1189,30 @@ index 3012cf66..6396beec 100644
 +      end
 +      JoinServer(selectedserver)
      end)
-   menu:addFullButton(_("~!Add server"), "a", 60, 210, function() RunAddServerMenu(); ServerListUpdate() end)
+-  menu:addFullButton(_("~!Add server"), "a", 60, 210, function() RunAddServerMenu(); ServerListUpdate() end)
++  AddButton(_("~!Add server"), "a", 0, 1, function() RunAddServerMenu(); ServerListUpdate() end)
    -- We need to stop this from loading when there are no servers.
-@@ -448,6 +466,12 @@ function CreateOnlineLobby(map, numplayers, isserver)
+-  menu:addFullButton(_("~!Edit server"), "a", 60, 240, function()
++  AddButton(_("~!Edit server"), "a", 1, 1, function()
+       if serverlist:getSelected() ~= nil then
+         RunEditServerMenu(serverlist:getSelected()); ServerListUpdate()
+       end
+     end)
+-  menu:addFullButton(_("~!Delete server"), "d", 60, 270, function()
++  AddButton(_("~!Delete server"), "d", 0, 2, function()
+       if serverlist:getSelected() ~= nil then
+         table.remove(wc2.preferences.ServerList, serverlist:getSelected()*2+1)
+         table.remove(wc2.preferences.ServerList, serverlist:getSelected()*2+1)
+@@ -268,7 +305,7 @@ function RunJoinIpMenu()
+   end)
+   menu:addLogicCallback(listener)
+ 
+-  menu:addFullButton(_("Cancel (~<Esc~>)"), "escape", 60, 300, function() menu:stop() end)
++  AddButton(_("Cancel (~<Esc~>)"), "escape", 1, 2, function() menu:stop() end)
+   menu:run()
+ end
+ 
+@@ -448,11 +485,94 @@ function CreateOnlineLobby(map, numplayers, isserver)
      end
    end
  
@@ -634,18 +1222,352 @@ index 3012cf66..6396beec 100644
 +    localIps = _("unknown")
 +  end
 +
++  -- WarDroid: laid out for touch on the main screen's grid. The title is at
++  -- the top right. On the left, below the Warcraft logo, the map's details
++  -- sit on a dark panel, with the game options below them. On the right,
++  -- the players: Warcraft II maps have at most 8, so slots 9 to 16 aren't
++  -- listed. Cancel and Start Game (or Ready) are at the bottom right.
++  -- Widgets keep the names the code below uses (menu.option_fow and so on).
    local teams = {""}
++  local grid = BigMenuGrid()
++  local font = LargeFont130()
++  local ddHeight = 24
++  -- A dropdown folds back to its font's height, so the font is that tall.
++  local ddFont = ScaledLargeFont(ddHeight)
++
++  local function MakeDropDown(list, callback, width)
++    local dd = ImageDropDownWidget()
++    if (GetPlayerData(GetThisPlayer(), "RaceName") == "human") then
++      dd:setItemImage(g_hibar)
++      dd:setDownNormalImage(g_hdslider_n)
++      dd:setDownPressedImage(g_hdslider_p)
++    else
++      dd:setItemImage(g_oibar)
++      dd:setDownNormalImage(g_odslider_n)
++      dd:setDownPressedImage(g_odslider_p)
++    end
++    dd:setFont(ddFont)
++    dd:setList(list)
++    dd.list = list
++    dd.callback = callback
++    dd:setActionCallback(function(s) callback(dd, s) end)
++    dd:setBaseColor(dark)
++    dd:setForegroundColor(clear)
++    dd:setBackgroundColor(dark)
++    dd:setSize(width, ddHeight)
++    return dd
++  end
++
++  local function MakeCheckBox(caption, callback)
++    local b = ImageCheckBox(caption)
++    b:setForegroundColor(clear)
++    b:setBackgroundColor(dark)
++    if (GetPlayerData(GetThisPlayer(), "RaceName") == "human") then
++      b:setUncheckedNormalImage(g_hcheckbox_off)
++      b:setUncheckedPressedImage(g_hcheckbox_off2)
++      b:setCheckedNormalImage(g_hcheckbox_on)
++      b:setCheckedPressedImage(g_hcheckbox_on2)
++    else
++      b:setUncheckedNormalImage(g_ocheckbox_off)
++      b:setUncheckedPressedImage(g_ocheckbox_off2)
++      b:setCheckedNormalImage(g_ocheckbox_on)
++      b:setCheckedPressedImage(g_ocheckbox_on2)
++    end
++    b.callback = callback
++    b:setActionCallback(function(s) callback(b, s) end)
++    b:setFont(font)
++    b:adjustSize()
++    return b
++  end
++
++  local function MakeLabel(text)
++    local l = Label(text)
++    l:setFont(font)
++    l:adjustSize()
++    return l
++  end
++
++  menu = WarMenu()
++  AddBigMenuTitle(menu, _("Create MultiPlayer game"))
++  menu.player_dropdown = {}
++  menu.player_team = {}
++  menu.player_status = {}
++
++  -- The players, on the right.
++  local rightX = grid.x(1)
++  local rowStep = 30
++  local listTop = math.floor(Video.Height * 0.09) + 40
++  menu:addLabel(_("Players"), rightX, listTop, font, false)
++  local nameWidth = 200
++  local teamWidth = 56
    for i=1,PlayerMax do
++    local y = listTop + 30 + (i - 1) * rowStep
      if Map.Info.PlayerType[i - 1] == PlayerPerson then
-@@ -518,6 +542,7 @@ function CreateOnlineLobby(map, numplayers, isserver)
-         HBox({ LLabel(_("File:"), "game"), LLabel(map, "game") }),
-         HBox({ LLabel(_("Players:"), "game"), LLabel(numplayers, "game") }),
-         HBox({ LLabel(_("Description:"), "game"), LLabel(_("Unknown map"), "game") }),
-+        HBox({ LLabel(_("Your IP:"), "game"):id("ip_caption"), LLabel(localIps, "game"):id("ip_address") }),
-         VBox({ -- game options
-           LCheckBox(_("Fog of war"), function(dd)
-             ServerSetupState.FogOfWar = bool2int(dd:isMarked())
-@@ -615,6 +640,8 @@ function CreateOnlineLobby(map, numplayers, isserver)
+-      playerTable[i + 1] = HBox({
+-        LDropDown(playerNames, function(dd)
++      local nameDD = MakeDropDown(playerNames, function(dd)
+           local newIdx = dd:getSelected()
+           if newIdx < 2 then
+             -- nothing to do, this is now an open slot or an AI
+@@ -466,7 +586,7 @@ function CreateOnlineLobby(map, numplayers, isserver)
+                 break
+               end
+             end
+-            
++
+             -- figure out which host to assign this new player index to
+             for i=0,PlayerMax-1 do
+               if Hosts[i].PlyName == newName then
+@@ -474,7 +594,7 @@ function CreateOnlineLobby(map, numplayers, isserver)
+                 break
+               end
+             end
+-            
++
+             -- deselect this human player from all other dropdowns
+             for i=1,PlayerMax do
+               if i ~= playerIndex then -- not ourselves
+@@ -490,9 +610,11 @@ function CreateOnlineLobby(map, numplayers, isserver)
+           assignMissingHumanPlayersToDropdowns()
+           calculateAiPlayers()
+           NetworkServerResyncClients()
+-        end):id("player_dropdown[" .. i .. "]"):withWidth(100),
+-        LDropDown(teams, function(dd)
+-           local playerIndex
++        end, nameWidth)
++      menu:add(nameDD, rightX, y)
++      menu.player_dropdown[i] = nameDD
++
++      local teamDD = MakeDropDown(teams, function(dd)
+            for i=1,PlayerMax do
+               if menu.player_team[i] == dd then
+                  ServerSetupState.ServerGameSettings.Presets[i - 1].Team = dd:getSelected() - 1
+@@ -500,102 +622,132 @@ function CreateOnlineLobby(map, numplayers, isserver)
+                  break
+               end
+            end
+-        end):id("player_team[" .. i .. "]"):withWidth(Fonts["large"]:Width(tostring(PlayerMax))* 2),
+-        LLabel("", "game"):id("player_status[" .. i .. "]"),
+-      })
++        end, teamWidth)
++      menu:add(teamDD, rightX + nameWidth + 8, y)
++      menu.player_team[i] = teamDD
++
++      local status = MakeLabel("")
++      menu:add(status, rightX + nameWidth + teamWidth + 16, y + 1)
++      menu.player_status[i] = status
+       teams[#teams + 1] = tostring(#teams)
+-    else
+-      playerTable[i + 1] = LLabel(string.format(_("Slot %d unavailable"), i), "small")
++    elseif i <= 8 then
++      menu:addLabel(string.format(_("Slot %d unavailable"), i), rightX, y + 1, font, false)
+     end
+   end
+ 
+-  menu = WarMenuWithLayout(_("Create MultiPlayer game"), nil, VBox({
+-    LFiller(),
+-    HBox({ -- screen split
+-      LFiller(),
+-      VBox({ -- game properties
+-        HBox({ _("Map") }),
+-        HBox({ LLabel(_("File:"), "game"), LLabel(map, "game") }),
+-        HBox({ LLabel(_("Players:"), "game"), LLabel(numplayers, "game") }),
+-        HBox({ LLabel(_("Description:"), "game"), LLabel(_("Unknown map"), "game") }),
+-        VBox({ -- game options
+-          LCheckBox(_("Fog of war"), function(dd)
+-            ServerSetupState.FogOfWar = bool2int(dd:isMarked())
+-            NetworkServerResyncClients()
+-          end):id("option_fow"),
+-          HBox({
+-            LLabel(_("Terrain:"), "game"),
+-            LDropDown({_("Hidden"), _("Known"), _("Explored")}, function(dd) 
+-              ServerSetupState.RevealMap = dd:getSelected()
+-              NetworkServerResyncClients()
+-            end):id("option_terrain"):withWidth(120),
+-          }),
+-          HBox({
+-            LLabel(_("~<Your Race:~>"), "game"),
+-            LDropDown({_("Map Default"), _("Human"), _("Orc")}, function(dd)
+-              if isserver then
+-                ServerSetupState.Race[serverHostPlayerSlot()] = dd:getSelected() - 1
+-                NetworkServerResyncClients()
+-              else
+-                LocalSetupState.Race[Hosts[NetLocalHostsSlot].PlyNr] = dd:getSelected() - 1
+-              end
+-            end):id("option_race"):withWidth(120),
+-          }),
+-          HBox({
+-            LLabel(_("Units:"), "game"),
+-            LDropDown({_("Map Default"), _("One Peasant Only")}, function(dd)
+-              ServerSetupState.UnitsOption = dd:getSelected() - 1
+-              NetworkServerResyncClients()
+-            end):id("option_units"):withWidth(120),
+-          }),
+-          HBox({
+-            LLabel(_("Resources:"), "game"),
+-            LDropDown({_("Map Default"), _("Low"), _("Medium"), _("High")}, function(dd)
+-              ServerSetupState.ResourcesOption = dd:getSelected() - 1
+-              NetworkServerResyncClients()
+-            end):id("option_resources"):withWidth(120),
+-          }),
+-          LCheckBox(_("Dedicated AI Server:"), function (dd)
+-            local hostSlot = serverHostPlayerSlot()
+-            if dd:isMarked() then
+-              -- 2 == closed
+-              ServerSetupState.CompOpt[hostSlot] = 2
+-            else
+-              -- 0 == available
+-              ServerSetupState.CompOpt[hostSlot] = 0
+-            end
+-            NetworkServerResyncClients()
+-          end):id("option_dedicated_ai_server"),
+-        }), -- end of game options
+-      }), -- end of game properties
+-      LFiller(),
+-      VBox(playerTable):withPadding(2, true),
+-      LFiller(),
+-    }), -- end of screen split
+-    LFiller(),
+-    HBox({
+-      LFiller(),
+-      LButton(_("Cancel (~<Esc~>)"), "escape", function()
+-        InitGameSettings()
+-        if isserver then
+-          OnlineService.stopadvertising()
+-        else
+-          NetworkDetachFromServer()
+-        end
+-        menu:stop()
+-      end),
+-      LCheckBox(_("~!Ready"), function(dd)
+-        LocalSetupState.Ready[NetLocalHostsSlot] = bool2int(dd:isMarked())
+-      end):id("checkbox_ready"),
+-      LButton(_("~!Start Game"), "s", function()
+-        NetworkServerStartGame()
+-        NetworkGamePrepareGameSettings()
+-        RunMap(map)
+-        menu:stop()
+-      end):id("button_start_game"),
+-      LFiller(),
+-    }),
+-  }):withPadding(4, true))
++  -- The map's details on a dark panel, on the left below the logo. The text
++  -- sits inside the panel, so any that's too long is cut off at its edge.
++  local leftX = grid.x(0)
++  local leftW = grid.width
++  local top = grid.top
++  local pad = 7
++  local lineStep = 25
++  local panelBox = Container()
++  panelBox:setOpaque(true)
++  panelBox:setBaseColor(Color(0, 0, 0, 160))
++  local panelH = 5 * lineStep + 2 * pad - 3
++  panelBox:setSize(leftW, panelH)
++  menu:add(panelBox, leftX, top)
++  local function PanelLine(row, caption, value)
++    local l = MakeLabel(caption)
++    panelBox:add(l, pad, pad + row * lineStep)
++    local v = MakeLabel(value)
++    panelBox:add(v, pad + l:getWidth() + 8, pad + row * lineStep)
++    return l, v
++  end
++  PanelLine(0, _("File:"), string.match(map, "([^/]*)$") or map)
++  PanelLine(1, _("Players:"), "" .. numplayers)
++  PanelLine(2, _("Description:"), _("Unknown map"))
++  menu.ip_caption, menu.ip_address = PanelLine(3, _("Your IP:"), localIps)
++  menu.option_fow = MakeCheckBox(_("Fog of war"), function(dd)
++    ServerSetupState.FogOfWar = bool2int(dd:isMarked())
++    NetworkServerResyncClients()
++  end)
++  panelBox:add(menu.option_fow, pad, pad + 4 * lineStep)
++
++  -- The game options below the panel: a label and a dropdown per row, the
++  -- dropdowns lined up.
++  local optionLabels = {_("Terrain:"), _("~<Your Race:~>"), _("Units:"), _("Resources:")}
++  local labelWidth = 0
++  for i, text in ipairs(optionLabels) do
++    labelWidth = math.max(labelWidth, font:Width(text))
++  end
++  local ddX = leftX + pad + labelWidth + 10
++  local ddW = math.min(220, leftW - 2 * pad - labelWidth - 10)
++  local optTop = top + panelH + 2
++  local optStep = 30
++  local function OptionRow(row, text, list, callback)
++    menu:addLabel(text, leftX + pad, optTop + row * optStep + 1, font, false)
++    local dd = MakeDropDown(list, callback, ddW)
++    menu:add(dd, ddX, optTop + row * optStep)
++    return dd
++  end
++  menu.option_terrain = OptionRow(0, optionLabels[1], {_("Hidden"), _("Known"), _("Explored")}, function(dd)
++    ServerSetupState.RevealMap = dd:getSelected()
++    NetworkServerResyncClients()
++  end)
++  menu.option_race = OptionRow(1, optionLabels[2], {_("Map Default"), _("Human"), _("Orc")}, function(dd)
++    if isserver then
++      ServerSetupState.Race[serverHostPlayerSlot()] = dd:getSelected() - 1
++      NetworkServerResyncClients()
++    else
++      LocalSetupState.Race[Hosts[NetLocalHostsSlot].PlyNr] = dd:getSelected() - 1
++    end
++  end)
++  menu.option_units = OptionRow(2, optionLabels[3], {_("Map Default"), _("One Peasant Only")}, function(dd)
++    ServerSetupState.UnitsOption = dd:getSelected() - 1
++    NetworkServerResyncClients()
++  end)
++  menu.option_resources = OptionRow(3, optionLabels[4], {_("Map Default"), _("Low"), _("Medium"), _("High")}, function(dd)
++    ServerSetupState.ResourcesOption = dd:getSelected() - 1
++    NetworkServerResyncClients()
++  end)
++  menu.option_dedicated_ai_server = MakeCheckBox(_("Dedicated AI Server"), function (dd)
++    local hostSlot = serverHostPlayerSlot()
++    if dd:isMarked() then
++      -- 2 == closed
++      ServerSetupState.CompOpt[hostSlot] = 2
++    else
++      -- 0 == available
++      ServerSetupState.CompOpt[hostSlot] = 0
++    end
++    NetworkServerResyncClients()
++  end)
++  menu:add(menu.option_dedicated_ai_server, leftX + pad, optTop + 4 * optStep + 2)
++  -- The dark panel reaches down behind the options too, so all the text on
++  -- the left sits on it. It was added first, so it's drawn underneath them.
++  panelBox:setSize(leftW, optTop + 4 * optStep + 2
++    + menu.option_dedicated_ai_server:getHeight() + pad - top)
++
++  -- Cancel and Start Game (or Ready, for a joining player) at the bottom
++  -- right.
++  local gap = 12
++  local bw = math.floor((grid.width - gap) / 2)
++  local bh = 44
++  local by = Video.Height - 16 - bh
++  local cancel = function()
++    InitGameSettings()
++    if isserver then
++      OnlineService.stopadvertising()
++    else
++      NetworkDetachFromServer()
++    end
++    menu:stop()
++  end
++  local cancelButton = menu:addBigButton(_("Cancel (~<Esc~>)"), "escape", rightX, by, cancel, bw, bh)
++  cancelButton.callback = cancel
++  local start = function()
++    NetworkServerStartGame()
++    NetworkGamePrepareGameSettings()
++    RunMap(map)
++    menu:stop()
++  end
++  menu.button_start_game = menu:addBigButton(_("~!Start Game"), "s", rightX + bw + gap, by, start, bw, bh)
++  menu.button_start_game.callback = start
++  menu.checkbox_ready = MakeCheckBox(_("~!Ready"), function(dd)
++    LocalSetupState.Ready[NetLocalHostsSlot] = bool2int(dd:isMarked())
++  end)
++  menu:add(menu.checkbox_ready, rightX + bw + gap + 10, by + math.floor((bh - menu.checkbox_ready:getHeight()) / 2))
+ 
+   for i=1,PlayerMax do
+      if menu.player_team[i] then
+@@ -615,6 +767,8 @@ function CreateOnlineLobby(map, numplayers, isserver)
      end
      menu.checkbox_ready:setVisible(true)
      menu.button_start_game:setVisible(false)
@@ -654,15 +1576,130 @@ index 3012cf66..6396beec 100644
      menu.option_fow:setEnabled(false)
      menu.option_terrain:setEnabled(false)
      menu.option_units:setEnabled(false)
-@@ -843,10 +870,150 @@ function RunCreateMultiGameMenu(s)
+@@ -780,23 +934,55 @@ function RunCreateMultiGameMenu(s)
+   local description = "No map"
+   local mapfile = "maps/skirmish/multiplayer/(2)timeless-isle.smp.gz"
+   local playerCount = 1
+-  local sx = Video.Width / 20
+-  local sy = Video.Height / 20
+-
+-  menu = WarMenu(_("Create MultiPlayer game"))
+ 
+-  menu:writeText(_("File:"), sx, sy*3+30)
+-  local maptext = menu:writeText(mapfile, sx+50, sy*3+30)
+-  menu:writeText(_("Players:"), sx, sy*3+50)
+-  local players = menu:writeText(playerCount, sx+70, sy*3+50)
+-  menu:writeText(_("Description:"), sx, sy*3+70)
+-  local descr = menu:writeText(description, sx+20, sy*3+90)
++  -- Laid out for touch on the main screen's grid: the title at the top
++  -- right; on the left, below the Warcraft logo, the chosen map's details
++  -- and big Create Game and Cancel buttons; on the right, the maps in a list
++  -- with big rows.
++  menu = WarMenu()
++  local grid = BigMenuGrid()
++  AddBigMenuTitle(menu, _("Create MultiPlayer game"))
++
++  local font = LargeFont130()
++  local lineHeight = 30
++  local pad = 10
++  -- A dark, see-through panel behind the details, so the text stands out
++  -- from the background picture. The text sits inside the panel, so any
++  -- that runs past its edge is cut off rather than drawn over the list.
++  local panelBox = Container()
++  panelBox:setOpaque(true)
++  panelBox:setBaseColor(Color(0, 0, 0, 160))
++  panelBox:setSize(grid.width, 3 * lineHeight + 2 * pad - 8)
++  menu:add(panelBox, grid.x(0), grid.y(0, 4))
++  local function FileName(path)
++    return string.match(path, "([^/]*)$")
++  end
++  local function AddText(text, x, y)
++    local l = Label(text)
++    l:setFont(font)
++    l:adjustSize()
++    panelBox:add(l, x, y)
++    return l
++  end
++  local function AddLine(row, label)
++    local l = AddText(label, pad, pad + row * lineHeight)
++    return AddText("", pad + l:getWidth() + 10, pad + row * lineHeight)
++  end
++  local descr = AddLine(0, _("Map:"))
++  local players = AddLine(1, _("Players:"))
++  local maptext = AddLine(2, _("File:"))
++  local function SetText(label, text)
++    label:setCaption(text)
++    label:adjustSize()
++  end
++  SetText(descr, description)
++  SetText(players, "" .. playerCount)
++  SetText(maptext, FileName(mapfile))
+ 
+   local OldPresentMap = PresentMap
+   PresentMap = function(desc, nplayers, w, h, id)
+     description = desc
+-    descr:setCaption(desc)
+-    descr:adjustSize()
++    SetText(descr, desc)
+     OldPresentMap(desc, nplayers, w, h, id)
+   end
+   local oldDefinePlayerTypes = DefinePlayerTypes
+@@ -809,17 +995,27 @@ function RunCreateMultiGameMenu(s)
+         playerCount = playerCount + 1
+       end
+     end
+-    players:setCaption(""..playerCount)
+-    players:adjustSize()
++    SetText(players, "" .. playerCount)
+     oldDefinePlayerTypes(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16)
+   end
+   Load(mapfile)
+-  local browser = menu:addBrowser("maps/", "^.*%.smp%.?g?z?$", sx*10, sy*2+20, sx*8, sy*11)
++  -- The list runs from below the title down to the bottom of the Cancel
++  -- button.
++  local listTop = math.floor(Video.Height * 0.09) + 34
++  local listBottom = grid.y(3, 4) + grid.height
++  -- Many map names are wider than the list, so it has a horizontal scroll
++  -- bar too; leave room for the bar under the last row.
++  local barHeight = 18
++  local rows = math.floor((listBottom - listTop - barHeight) / BigListRowHeight)
++  local listW = Video.Width - grid.x(1) - grid.gapX
++  local listH = rows * BigListRowHeight + barHeight
++  local browser = menu:addBrowser("maps/", "^.*%.smp%.?g?z?$", grid.x(1),
++    listBottom - listH, listW, listH)
++  SetBigListFont(browser, listW, listH, table.getn(browser.itemslist) > rows)
+   local function cb(s)
+     mapfile = browser.path .. browser:getSelectedItem()
+     Load(mapfile)
+-    maptext:setCaption(mapfile)
+-    maptext:adjustSize()
++    SetText(maptext, FileName(mapfile))
+   end
+   browser:setActionCallback(cb)
+ 
+@@ -833,9 +1029,8 @@ function RunCreateMultiGameMenu(s)
+ 
+   browser:setDoubleClickAction(createFunc)
+ 
+-  menu:addFullButton(_("~!Create Game"), "c", sx, sy*11, createFunc)
+-
+-  menu:addFullButton(_("Cancel (~<Esc~>)"), "escape", sx, sy*12+25,
++  AddBigGridButton(menu, grid, _("~!Create Game"), "c", 0, 2, 4, createFunc)
++  AddBigGridButton(menu, grid, _("Cancel (~<Esc~>)"), "escape", 0, 3, 4,
+     function() menu:stop() end)
+ 
+   menu:run()
+@@ -843,10 +1038,171 @@ function RunCreateMultiGameMenu(s)
    DefinePlayerTypes = oldDefinePlayerTypes
  end
  
 +-- WarDroid: when the screen is wide enough, the multiplayer form moves to the
 +-- left and the on-screen keyboard sits to its right, so a phone can type a
 +-- nickname or password. The spare width is split evenly around the two.
-+local mpFormWidth = 280
++local mpFormWidth = 330
 +local mpMinGap = 10
++-- The form's buttons are big, for touch, with the large font at 130%.
++local mpButtonHeight = 44
 +
 +-- The keyboard's scale, or nil when there's no room for it.
 +local function MultiPlayerKeyboardScale()
@@ -688,6 +1725,24 @@ index 3012cf66..6396beec 100644
 +    return nil
 +  end
 +  return math.floor(MultiPlayerSpare() / 3) * 2 + mpFormWidth
++end
++
++-- A big button in the form, as wide as the form unless a width is given.
++function AddMultiPlayerButton(menu, caption, hotkey, y, callback, width)
++  return menu:addBigButton(caption, hotkey, MultiPlayerFormX(), y, callback,
++                           width or mpFormWidth, mpButtonHeight)
++end
++
++-- The tops of count form buttons, spread evenly from top down to the
++-- version line at the bottom of the screen.
++function MultiPlayerButtonYs(top, count)
++  local bottom = Video.Height - 24
++  local gap = math.floor((bottom - top - count * mpButtonHeight) / (count + 1))
++  local ys = {}
++  for i = 1, count do
++    ys[i] = top + gap * i + mpButtonHeight * (i - 1)
++  end
++  return ys
 +end
 +
 +-- The large font at 130%, for the screen's title.
@@ -786,10 +1841,11 @@ index 3012cf66..6396beec 100644
 +-- Add a labelled text field in the large font, filling the form's width
 +-- from x. Returns the field and the y below it.
 +function AddMultiPlayerField(menu, label, text, x, y)
-+  local font = Fonts["large"]
++  -- The large font at 130%, in a box tall enough to hold it with room
++  -- above and below.
++  local font = LargeFont130()
 +  local labelWidth = math.max(font:Width(_("Nickname :")), font:Width(_("Password :"))) + 10
-+  -- The bar is 18 pixels tall; 20% taller keeps the large text inside it.
-+  local height = 22
++  local height = 30
 +  WriteOutlinedText(menu, label, x, y + (height - font:Height()) / 2, font)
 +  local field = menu:addTextInputField(text, x + labelWidth, y, mpFormWidth - labelWidth)
 +  field:setFont(font)
@@ -806,19 +1862,19 @@ index 3012cf66..6396beec 100644
  
    local function FixMusic()
      wargus.playlist = { "music/Orc Briefing" .. wargus.music_extension }
-@@ -859,24 +1026,18 @@ function RunMultiPlayerGameMenu(s)
+@@ -859,24 +1215,18 @@ function RunMultiPlayerGameMenu(s)
    InitGameSettings()
    InitNetwork1()
  
 -  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
-+  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, Video.Width / 2, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
- 
+-
 -  menu:addLabel(_("~<Multiplayer Network Game~>"), offx + 640/2 + 12, offy + 192)
-+  AddMultiPlayerTitle(menu, offx, offy)
++  menu:addLabel(wargus.Name .. " V" .. wargus.Version .. " - " .. wargus.Copyright, Video.Width / 2, (Video.Height - 90) + 18*4, Fonts["small"]) -- Copyright information.
  
 -  menu:writeText(_("Nickname :"), 208 + offx, 248 + offy)
 -  local nick = menu:addTextInputField(GetLocalPlayerName(), offx + 298, 244 + offy)
--
++  AddMultiPlayerTitle(menu, offx, offy)
+ 
 -  menu:writeText(_("Password :"), 208 + offx, 248 + offy + 28)
 -  local pass = menu:addTextInputField("", offx + 298, 244 + offy + 28)
 +  local nick, rowY = AddMultiPlayerField(menu, _("Nickname :"), MultiPlayerNickname(), 208 + offx, 232 + offy)
@@ -827,7 +1883,7 @@ index 3012cf66..6396beec 100644
    pass:setPassword(true);
  
 -  local loginBtn = menu:addHalfButton(_("Go ~!Online"), "o", 208 + offx, 298 + (36 * 0) + offy,
-+  local loginBtn = menu:addHalfButton(_("Go ~!Online"), "o", 208 + offx, rowY + 4,
++  local loginBtn = AddMultiPlayerButton(menu, _("Go ~!Online"), "o", rowY + 8,
      function()
 -      if nick:getText() ~= GetLocalPlayerName() then
 -        SetLocalPlayerName(nick:getText())
@@ -838,18 +1894,30 @@ index 3012cf66..6396beec 100644
        if string.len(pass:getText()) == 0 then
           ErrorMenu("Please enter your password")
        else
-@@ -886,7 +1047,7 @@ function RunMultiPlayerGameMenu(s)
+@@ -885,11 +1235,12 @@ function RunMultiPlayerGameMenu(s)
+          OnlineService.login(nick:getText(), pass:getText())
           RunOnlineMenu()
        end
-   end)
+-  end)
 -  local signupLabel = menu:addLabel(
++  end, math.floor(mpFormWidth / 2))
++  -- Sign up is centred in the space to Go Online's right.
 +  local signupLabel = AddOutlinedLabel(menu,
       _("Sign up"),
-      loginBtn:getWidth() + loginBtn:getX() + loginBtn:getWidth() / 2,
-      loginBtn:getY() + loginBtn:getHeight() / 4)
-@@ -958,21 +1119,13 @@ function RunMultiPlayerGameMenu(s)
+-     loginBtn:getWidth() + loginBtn:getX() + loginBtn:getWidth() / 2,
+-     loginBtn:getY() + loginBtn:getHeight() / 4)
++     loginBtn:getX() + loginBtn:getWidth() + (mpFormWidth - loginBtn:getWidth()) / 2,
++     loginBtn:getY() + (loginBtn:getHeight() - 22) / 2, LargeFont130())
+   local signUpCb = function(evt, btn, cnt)
+      if evt == "mouseClick" then
  
-   menu:addFullButton(_("~!Join Local Game"), "j", 208 + offx, 298 + (36 * 2) + offy,
+@@ -956,30 +1307,25 @@ function RunMultiPlayerGameMenu(s)
+   local signUpListener = LuaActionListener(signUpCb)
+   signupLabel:addMouseListener(signUpListener)
+ 
+-  menu:addFullButton(_("~!Join Local Game"), "j", 208 + offx, 298 + (36 * 2) + offy,
++  local ys = MultiPlayerButtonYs(loginBtn:getY() + loginBtn:getHeight(), 3)
++  AddMultiPlayerButton(menu, _("~!Join Local Game"), "j", ys[1],
      function()
 -      if nick:getText() ~= GetLocalPlayerName() then
 -        SetLocalPlayerName(nick:getText())
@@ -860,7 +1928,8 @@ index 3012cf66..6396beec 100644
        RunJoinIpMenu()
        FixMusic()
      end)
-   menu:addFullButton(_("~!Create Game"), "c", 208 + offx, 298 + (36 * 3) + offy,
+-  menu:addFullButton(_("~!Create Game"), "c", 208 + offx, 298 + (36 * 3) + offy,
++  AddMultiPlayerButton(menu, _("~!Create Game"), "c", ys[2],
      function()
 -      if nick:getText() ~= GetLocalPlayerName() then
 -        SetLocalPlayerName(nick:getText())
@@ -871,8 +1940,9 @@ index 3012cf66..6396beec 100644
        RunCreateMultiGameMenu()
        FixMusic()
      end)
-@@ -980,6 +1133,8 @@ function RunMultiPlayerGameMenu(s)
-   menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", 208 + offx, 298 + (36 * 5) + offy,
+ 
+-  menu:addFullButton(_("Previous Menu (~<Esc~>)"), "escape", 208 + offx, 298 + (36 * 5) + offy,
++  AddMultiPlayerButton(menu, _("Previous Menu (~<Esc~>)"), "escape", ys[3],
      function() menu:stop() end)
  
 +  AddMultiPlayerKeyboard(menu, 230 + offy, {nick, pass})
@@ -881,7 +1951,7 @@ index 3012cf66..6396beec 100644
  
    ExitNetwork1()
 diff --git a/scripts/menus/options.lua b/scripts/menus/options.lua
-index 130b9faf..3299abce 100644
+index 130b9faf..3ff005ff 100644
 --- a/scripts/menus/options.lua
 +++ b/scripts/menus/options.lua
 @@ -728,7 +728,7 @@ function BuildVideoOptionsMenu()
@@ -893,23 +1963,60 @@ index 130b9faf..3299abce 100644
  
     menu:addLabel(_("Video Options"), offx + 176, offy + 1 + 26*-2)
     menu:addLabel(_("Video Resolution"), offx + 16, offy + 34 , Fonts["game"], false)
-@@ -875,7 +875,7 @@ function RunOptionsSubMenu()
+@@ -873,24 +873,23 @@ function RunOptionsSubMenu()
+  
+    local menu = WarMenu()
     local offx = (Video.Width - 640) / 2
-    local offy = (Video.Height - 480) / 2
-    
+-   local offy = (Video.Height - 480) / 2
+-   
 -   menu:addLabel(wargus.Name .. _(" V") .. wargus.Version .. ", " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
+-   
+-   menu:addLabel(_("~<Game Options~>"), offx + 640/2, offy + 104 + 10)
+-   menu:addFullButton(_("Speeds (~<F6~>)"), "f6", offx + 208, offy + 104 + 36*1,
+-     function() RunSpeedsMenu() end)
+-   menu:addFullButton(_("Sound (~<F7~>)"), "f7", offx + 208, offy + 104 + 36*2,
+-                      function() RunGameSoundOptionsMenu(); end)
+-   menu:addFullButton(_("Preferences (~<F8~>)"), "f8", offx + 208, offy + 104 + 36*3,
+-     function() RunPreferencesMenu(); end)
+-   menu:addFullButton(_("Video (~<F9~>)"), "f9", offx + 208, offy + 104 + 36*4,
+-     function() RunVideoOptionsMenu(); menu:stop(1); RunOptionsSubMenu() end)
+-   menu:addFullButton(_("Language"), "f13", offx + 208, offy + 104 + 36*5,
+-     function() RunLanguageMenu();  end)
+-    
+-   menu:addFullButton(_("Previous (~<Esc~>)"), "escape", offx + 208, offy + 104 + 36*7,
+-     function() menu:stop() end)
+- 
++
 +   menu:addLabel(wargus.Name .. _(" V") .. wargus.Version .. " - " .. wargus.Copyright, offx + 320, (Video.Height - 90) + 18*4, Fonts["small"])
-    
-    menu:addLabel(_("~<Game Options~>"), offx + 640/2, offy + 104 + 10)
-    menu:addFullButton(_("Speeds (~<F6~>)"), "f6", offx + 208, offy + 104 + 36*1,
++
++   AddBigMenuTitle(menu, _("~<Game Options~>"))
++   AddBigButtonGrid(menu, {
++     {_("Speeds (~<F6~>)"), "f6",
++       function() RunSpeedsMenu() end},
++     {_("Sound (~<F7~>)"), "f7",
++       function() RunGameSoundOptionsMenu(); end},
++     {_("Preferences (~<F8~>)"), "f8",
++       function() RunPreferencesMenu(); end},
++     {_("Video (~<F9~>)"), "f9",
++       function() RunVideoOptionsMenu(); menu:stop(1); RunOptionsSubMenu() end},
++     {_("Language"), "f13",
++       function() RunLanguageMenu();  end},
++     {_("Previous (~<Esc~>)"), "escape",
++       function() menu:stop() end}})
++
+    return menu:run()
+  end
 diff --git a/scripts/menus/save.lua b/scripts/menus/save.lua
-index 3219ffae..05952514 100644
+index 3219ffae..575dce71 100644
 --- a/scripts/menus/save.lua
 +++ b/scripts/menus/save.lua
-@@ -34,19 +34,162 @@ function RunConfirmErase(name, menu)
+@@ -34,19 +34,161 @@ function RunConfirmErase(name, menu)
    confirm:run(false)
  end
  
+-function RunSaveMenu(isreturn)
+-  local menu = WarGameMenu(panel(3))
+-  menu:resize(384, 256)
 +-- WarDroid: an on-screen keyboard, so a phone without its own keyboard can
 +-- name a save or type a nickname. The multiplayer menu uses it too.
 +local keyArt = {}
@@ -953,7 +2060,8 @@ index 3219ffae..05952514 100644
 +  local keyWidth, keyHeight, keyGap, keyMargin = KeyMetrics(scale)
 +  return 10 * keyWidth + 9 * keyGap + 2 * keyMargin
 +end
-+
+ 
+-  menu:addLabel(_("Save Game"), 384 / 2, 11)
 +function ScreenKeyboardHeight(scale)
 +  local keyWidth, keyHeight, keyGap, keyMargin = KeyMetrics(scale)
 +  return 4 * keyHeight + 3 * keyGap + 2 * keyMargin
@@ -968,7 +2076,8 @@ index 3219ffae..05952514 100644
 +  end
 +  return nil
 +end
-+
+ 
+-  local t = menu:addTextInputField("game.sav", (384 - 300 - 18) / 2, 11 + 36, 318)
 +local keyboardGap = 8
 +
 +-- Add the keyboard at the given scale to menu at (x, y) on a panel of the
@@ -1010,19 +2119,19 @@ index 3219ffae..05952514 100644
 +      b:setNormalImage(KeyArt(widgets .. "button-small-normal.png", keyWidth, keyHeight))
 +      b:setPressedImage(KeyArt(widgets .. "button-small-pressed.png", keyWidth, keyHeight))
 +      b:setDisabledImage(KeyArt(widgets .. "button-small-grayed.png", keyWidth, keyHeight))
++      -- The characters fill most of the key: the large font scaled to 70%
++      -- of the key's height, and a little smaller for the wider "Del".
 +      if (key == "Del") then
-+        b:setFont(Fonts["game"])
++        b:setFont(ScaledLargeFont(math.floor(keyHeight * 0.5)))
 +      else
-+        b:setFont(Fonts["large"])
++        b:setFont(ScaledLargeFont(math.floor(keyHeight * 0.7)))
 +      end
 +      b:setSize(keyWidth, keyHeight)
 +    end
 +  end
 +end
 +
- function RunSaveMenu(isreturn)
--  local menu = WarGameMenu(panel(3))
--  menu:resize(384, 256)
++function RunSaveMenu(isreturn)
 +  local scale = ScreenKeyboardScale(Video.Width - 384 - keyboardGap)
 +  local withKeyboard = scale ~= nil
 +  local menu
@@ -1036,35 +2145,33 @@ index 3219ffae..05952514 100644
 +    menu = WarGameMenu(panel(3))
 +    menu:resize(384, 256)
 +  end
- 
-   menu:addLabel(_("Save Game"), 384 / 2, 11)
- 
-+  -- WarDroid: the name field is 30% taller, in the large font, and the save
-+  -- list below it gives up a row to make room. The list scrolls when there
-+  -- are more saves than rows.
-   local t = menu:addTextInputField("game.sav", (384 - 300 - 18) / 2, 11 + 36, 318)
-+  t:setFont(Fonts["large"])
-+  SetTextFieldHeight(t, 318, 24)
++
++  -- WarDroid: big for touch in the same 384 x 256 window: the title and
++  -- name field in the large font at 130%, a list of 4 big rows (Wargus had
++  -- 7 small ones) that scrolls when there are more saves, and big buttons.
++  local left = 24
++  local width = 384 - 2 * left
++  local rows = 4
++  local fieldY = 40
++  local fieldH = 30
++  local listY = fieldY + fieldH + 6
++  local listH = rows * BigListRowHeight
++  menu:addLabel(_("Save Game"), 384 / 2, 10, LargeFont130())
++
++  local t = menu:addTextInputField("game.sav", left, fieldY, width)
++  t:setFont(LargeFont130())
++  SetTextFieldHeight(t, width, fieldH)
    t:requestFocus()
  
+-  local browser = menu:addBrowser("~save", ".sav.gz$",
+-    (384 - 300 - 18) / 2, 11 + 36 + 22, 318, 126)
 +  local fresh = true
 +  if (withKeyboard) then
 +    AddScreenKeyboard(menu, scale, 384 + keyboardGap, 0, 256, function() return t end,
 +      function() return fresh end, function(v) fresh = v end)
 +  end
 +
-   local browser = menu:addBrowser("~save", ".sav.gz$",
--    (384 - 300 - 18) / 2, 11 + 36 + 22, 318, 126)
-+    (384 - 300 - 18) / 2, 11 + 36 + 28, 318, 108)
-+  -- The list's rows are as wide as the box, so with the vertical scroll bar
-+  -- they no longer fit and a horizontal bar appears too, hiding a row. When
-+  -- there are more saves than rows, narrow the rows by the bar's width:
-+  -- setting the font sizes the rows to the box's width at the time.
-+  if (table.getn(browser.itemslist) > 6) then
-+    browser:setSize(318 - browser:getScrollbarWidth(), 108)
-+    browser:setFont(Fonts["game"])
-+    browser:setSize(318, 108)
-+  end
++  local browser = menu:addBigBrowser("~save", ".sav.gz$", left, listY, width, rows)
    local function cb(s)
      t:setText(browser:getSelectedItem())
 +    t:setCaretPosition(string.len(t:getText()))
@@ -1072,6 +2179,25 @@ index 3219ffae..05952514 100644
    end
    browser:setActionCallback(cb)
  
+@@ -84,10 +226,14 @@ function RunSaveMenu(isreturn)
+         saveFunc()
+   end)
+ 
+-  menu:addHalfButton(_("~!Save"), "s", (384 - 300 - 18) / 2, 256 - 16 - 27, saveFunc)
+-
+-  menu:addHalfButton(_("Cancel (~<Esc~>)"), "escape", 384 - ((384 - 300 - 18) / 2) - 106, 256 - 16 - 27,
+-    function() menu:stop() end)
++  -- Save and Cancel side by side below the list.
++  local gap = 12
++  local bw = math.floor((width - gap) / 2)
++  local bh = 40
++  local by = listY + listH + math.floor((256 - listY - listH - bh) / 2)
++  menu:addBigButton(_("~!Save"), "s", left, by, saveFunc, bw, bh)
++  menu:addBigButton(_("Cancel (~<Esc~>)"), "escape", left + bw + gap, by,
++    function() menu:stop() end, bw, bh)
+   if (isreturn == nil) then
+ 	menu:run(false)
+   else 
 diff --git a/scripts/multiplayer.lua b/scripts/multiplayer.lua
 index 3fece7e1..93ba9866 100644
 --- a/scripts/multiplayer.lua
